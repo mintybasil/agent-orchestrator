@@ -1,0 +1,10 @@
+poll_interval_secs = 60
+assigned_to = "zeroklaw"
+
+[[repos]]
+owner = "zerokrab"
+repo = "bento-hancho"
+
+[[repos]]
+owner = "zerokrab"
+repo = "bento-bench"
