@@ -31,6 +31,9 @@ pub struct Step {
     /// Hooks that run *after* a successful hermes invocation.
     #[serde(default)]
     pub post_hooks: Vec<Hook>,
+    /// Optional hermes profile name passed via `--profile <name>`.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 #[cfg(test)]

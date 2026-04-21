@@ -4,13 +4,19 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-/// Invoke hermes with a single prompt argument.
+/// Invoke hermes with the given prompt, always passing `--yolo`.
+/// If `profile` is Some, also passes `--profile <name>`.
+/// The prompt is passed via `-p <prompt>`.
 /// Streams stdout/stderr to tracing::info!/tracing::error! line by line.
 /// Returns Ok(()) on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns Err.
-pub fn invoke(prompt: &str, error_file: &Path) -> Result<()> {
-    let mut child = Command::new("hermes")
-        .arg(prompt)
+pub fn invoke(prompt: &str, profile: Option<&str>, error_file: &Path) -> Result<()> {
+    let mut cmd = Command::new("hermes");
+    cmd.arg("-p").arg(prompt).arg("--yolo");
+    if let Some(p) = profile {
+        cmd.arg("--profile").arg(p);
+    }
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
