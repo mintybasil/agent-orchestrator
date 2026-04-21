@@ -1,0 +1,43 @@
+poll_interval_secs = 60
+assigned_to = "zeroklaw"
+
+[[repos]]
+owner = "zerokrab"
+repo = "bento-hancho"
+
+[[repos]]
+owner = "zerokrab"
+repo = "bento-bench"
+
+# Workflow steps executed sequentially for each assigned issue.
+# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
+
+[[steps]]
+name = "Plan"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Use the triage-summary skill and write the result to {{output_path}}/{{issue_number}}/plan.md."
+output_file = "{{output_path}}/{{issue_number}}/plan.md"
+profile = "pm"
+
+[[steps]]
+name = "Implement"
+prompt_template = "Implement the plan at {{output_path}}/{{issue_number}}/plan.md using the subagent-driven-development skill. Write a summary of what you did to {{output_path}}/{{issue_number}}/implementation.md."
+output_file = "{{output_path}}/{{issue_number}}/implementation.md"
+profile = "swe"
+
+[[steps]]
+name = "Review"
+prompt_template = "Use the requesting-code-review skill to produce {{output_path}}/{{issue_number}}/review.md."
+output_file = "{{output_path}}/{{issue_number}}/review.md"
+profile = "swe"
+
+[[steps]]
+name = "Remedy"
+prompt_template = "Use the receiving-code-review skill to address the review in {{output_path}}/{{issue_number}}/review.md. Update {{output_path}}/{{issue_number}}/implementation.md to reflect the changes you have made."
+output_file = "{{output_path}}/{{issue_number}}/implementation.md"
+profile = "swe"
+
+[[steps]]
+name = "Finalize"
+prompt_template = "Use the finalize-task skill."
+output_file = "{{output_path}}/{{issue_number}}/finalize.md"
+profile = "pm"
