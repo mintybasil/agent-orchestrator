@@ -6,6 +6,7 @@ pub struct Config {
     pub poll_interval_secs: u64,
     pub assigned_to: String,
     pub repos: Vec<RepoConfig>,
+    #[serde(default)]
     pub steps: Vec<Step>,
 }
 
