@@ -3,14 +3,14 @@ use serde::Deserialize;
 /// A hook that runs before or after a step.
 ///
 /// Deserialized from TOML using the `type` key as a discriminant:
-/// `{ type = "file_non_empty", path = "..." }` or
+/// `{ type = "file_not_empty", path = "..." }` or
 /// `{ type = "script", command = "...", args = ["..."] }`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Hook {
     /// Assert that the file at `path` exists and contains at least one byte.
     /// `path` may contain template placeholders (e.g. `"{{output_path}}"`).
-    FileNonEmpty { path: String },
+    FileNotEmpty { path: String },
 
     /// Spawn an external process.
     ///
@@ -52,7 +52,7 @@ mod tests {
     }
 
     #[test]
-    fn file_non_empty_hook_deserializes() {
+    fn file_not_empty_hook_deserializes() {
         let steps = r#"
 [[steps]]
 name = "triage"
@@ -60,7 +60,7 @@ prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
 output_file = "step_00_triage.md"
 
 [[steps.post_hooks]]
-type = "file_non_empty"
+type = "file_not_empty"
 path = "{{output_path}}"
 "#;
         let config = parse_config(steps).unwrap();
@@ -69,7 +69,7 @@ path = "{{output_path}}"
         assert_eq!(config.steps[0].post_hooks.len(), 1);
         assert!(matches!(
             config.steps[0].post_hooks[0],
-            Hook::FileNonEmpty { .. }
+            Hook::FileNotEmpty { .. }
         ));
     }
 

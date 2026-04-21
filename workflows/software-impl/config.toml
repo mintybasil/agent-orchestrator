@@ -1,5 +1,6 @@
 poll_interval_secs = 60
 assigned_to = "zeroklaw"
+allowed_issue_creators = ["mintybasil", "zeroklaw"]
 
 [[repos]]
 owner = "zerokrab"

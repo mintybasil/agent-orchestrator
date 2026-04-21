@@ -26,7 +26,7 @@ impl std::fmt::Display for IssueKey {
 /// On failure writes a human-readable message to `error_path` and returns Err.
 fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Result<()> {
     match hook {
-        Hook::FileNonEmpty { path: raw_path } => {
+        Hook::FileNotEmpty { path: raw_path } => {
             let path = render(raw_path, vars);
             match fs::metadata(&path) {
                 Ok(m) if m.len() > 0 => Ok(()),

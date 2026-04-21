@@ -83,7 +83,7 @@ args = ["{{issue_number}}"]
 
 # Optional post-hooks (run after hermes)
 [[steps.post_hooks]]
-type = "file_non_empty"
+type = "file_not_empty"
 path = "{{output_path}}"
 ```
 
@@ -101,7 +101,7 @@ path = "{{output_path}}"
 
 | `type` | Fields | Effect |
 |---|---|---|
-| `file_non_empty` | `path` (string, supports placeholders) | Fail if file is absent or zero bytes |
+| `file_not_empty` | `path` (string, supports placeholders) | Fail if file is absent or zero bytes |
 | `script` | `command` (string), `args` (array of strings, support placeholders) | Spawn process; fail on non-zero exit |
 
 Hooks run in declaration order. A failure aborts the step and marks the issue as failed.

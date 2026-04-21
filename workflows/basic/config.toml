@@ -1,0 +1,34 @@
+poll_interval_secs = 60
+assigned_to = "zeroklaw"
+allowed_issue_creators = ["mintybasil", "zeroklaw"]
+
+[[repos]]
+owner = "zerokrab"
+repo = "bento-hancho"
+
+[[repos]]
+owner = "zerokrab"
+repo = "bento-bench"
+
+# Workflow steps executed sequentially for each assigned issue.
+# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
+
+[[steps]]
+name = "Plan"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Use the writing-plans skill, and store the plan in {{output_path}}/{{issue_number}}/plan.md."
+output_file = "{{output_path}}/{{issue_number}}/plan.md"
+profile = "pm"
+
+[[steps.post_hooks]]
+type = "file_not_empty"
+path = "{{output_path}}"
+
+[[steps]]
+name = "Implement"
+prompt_template = "Use the executing-plans skill to implement {{output_path}}/{{issue_number}}/plan.md."
+output_file = "{{output_path}}/{{issue_number}}/implementation.md"
+profile = "swe"
+
+[[steps.post_hooks]]
+type = "file_not_empty"
+path = "{{output_path}}"
