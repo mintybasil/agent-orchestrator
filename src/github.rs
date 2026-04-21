@@ -3,8 +3,14 @@ use reqwest::Client;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct IssueUser {
+    pub login: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Issue {
     pub number: u64,
+    pub user: IssueUser,
 }
 
 pub async fn list_assigned_issues(

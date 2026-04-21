@@ -58,6 +58,22 @@ pub async fn run_poll_loop(
                 }
                 Ok(issues) => {
                     for issue in issues {
+                        // Filter by allowed_issue_creators whitelist if configured.
+                        if !config.allowed_issue_creators.is_empty()
+                            && !config
+                                .allowed_issue_creators
+                                .contains(&issue.user.login)
+                        {
+                            tracing::warn!(
+                                "[{}/{}/{}] skipping issue from non-whitelisted creator '{}'",
+                                repo_cfg.owner,
+                                repo_cfg.repo,
+                                issue.number,
+                                issue.user.login,
+                            );
+                            continue;
+                        }
+
                         let key_str =
                             format!("{}/{}/{}", repo_cfg.owner, repo_cfg.repo, issue.number);
                         let issue_key = IssueKey {

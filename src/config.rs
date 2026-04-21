@@ -8,6 +8,8 @@ pub struct Config {
     pub repos: Vec<RepoConfig>,
     #[serde(default)]
     pub steps: Vec<Step>,
+    #[serde(default)]
+    pub allowed_issue_creators: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
