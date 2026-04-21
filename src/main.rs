@@ -22,6 +22,15 @@ async fn main() {
         }
     };
 
+    // Load workflow
+    let workflow_steps = match crate::workflow::load(&config.workflow_file) {
+        Ok(steps) => steps,
+        Err(e) => {
+            eprintln!("ERROR: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     // Init tracing (after config so RUST_LOG is readable)
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -65,15 +74,16 @@ async fn main() {
     }
 
     tracing::info!(
-        "agent-orchestrator starting: {} repos, poll every {}s, assigned_to={}",
+        "agent-orchestrator starting: {} repos, {} workflow steps, poll every {}s, assigned_to={}",
         config.repos.len(),
+        workflow_steps.len(),
         config.poll_interval_secs,
         config.assigned_to
     );
 
     let completed = poller::load_completed(&data_root);
 
-    if let Err(e) = poller::run_poll_loop(config, token, data_root, completed).await {
+    if let Err(e) = poller::run_poll_loop(config, token, data_root, completed, workflow_steps).await {
         tracing::error!("poll loop exited with error: {}", e);
         std::process::exit(1);
     }

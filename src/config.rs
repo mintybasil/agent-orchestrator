@@ -4,6 +4,7 @@ use anyhow::Context;
 pub struct Config {
     pub poll_interval_secs: u64,
     pub assigned_to: String,
+    pub workflow_file: std::path::PathBuf,
     pub repos: Vec<RepoConfig>,
 }
 
