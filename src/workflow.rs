@@ -41,7 +41,7 @@ mod tests {
     /// Helper: parse a Config from a TOML string with boilerplate headers.
     fn parse_config(steps_toml: &str) -> anyhow::Result<Config> {
         let full = format!(
-            "poll_interval_secs = 60\nassigned_to = \"test\"\n\n[[repos]]\nowner = \"o\"\nrepo = \"r\"\n\n{}",
+            "poll_interval_secs = 60\nassigned_to = \"test\"\nallowed_issue_creators = [\"test\"]\n\n[[repos]]\nowner = \"o\"\nrepo = \"r\"\n\n{}",
             steps_toml
         );
         // Write to a temp file and load via Config::load
