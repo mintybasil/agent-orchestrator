@@ -3,14 +3,8 @@ use reqwest::Client;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct IssueUser {
-    pub login: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct Issue {
     pub number: u64,
-    pub user: IssueUser,
 }
 
 pub async fn list_assigned_issues(
@@ -18,6 +12,7 @@ pub async fn list_assigned_issues(
     owner: &str,
     repo: &str,
     assigned_to: &str,
+    creator: &str,
     token: &str,
 ) -> Result<Vec<Issue>> {
     let mut all_issues: Vec<Issue> = Vec::new();
@@ -25,7 +20,7 @@ pub async fn list_assigned_issues(
 
     loop {
         let url = format!(
-            "https://api.github.com/repos/{owner}/{repo}/issues?state=open&assignee={assigned_to}&per_page=100&page={page}"
+            "https://api.github.com/repos/{owner}/{repo}/issues?state=open&assignee={assigned_to}&creator={creator}&per_page=100&page={page}"
         );
         let resp = client
             .get(&url)

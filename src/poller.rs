@@ -38,130 +38,120 @@ pub async fn run_poll_loop(
         tracing::info!("poll tick: checking {} repos", config.repos.len());
 
         for repo_cfg in &config.repos {
-            match list_assigned_issues(
-                &client,
-                &repo_cfg.owner,
-                &repo_cfg.repo,
-                &config.assigned_to,
-                &token,
-            )
-            .await
-            {
-                Err(e) => {
-                    tracing::error!(
-                        "GitHub API error for {}/{}: {}",
-                        repo_cfg.owner,
-                        repo_cfg.repo,
-                        e
-                    );
-                    continue;
-                }
-                Ok(issues) => {
-                    for issue in issues {
-                        // Filter by allowed_issue_creators whitelist if configured.
-                        if !config.allowed_issue_creators.is_empty()
-                            && !config.allowed_issue_creators.contains(&issue.user.login)
-                        {
-                            tracing::warn!(
-                                "[{}/{}/{}] skipping issue from non-whitelisted creator '{}'",
-                                repo_cfg.owner,
-                                repo_cfg.repo,
-                                issue.number,
-                                issue.user.login,
-                            );
-                            continue;
-                        }
-
-                        let key_str =
-                            format!("{}/{}/{}", repo_cfg.owner, repo_cfg.repo, issue.number);
-                        let issue_key = IssueKey {
-                            owner: repo_cfg.owner.clone(),
-                            repo: repo_cfg.repo.clone(),
-                            number: issue.number,
-                        };
-
-                        // Skip if completed
-                        if completed
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .contains(&key_str)
-                        {
-                            continue;
-                        }
-                        // Skip if permanently failed this run
-                        if permanently_failed
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .contains(&key_str)
-                        {
-                            continue;
-                        }
-                        // Skip if in-flight
-                        if in_flight
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .contains(&key_str)
-                        {
-                            continue;
-                        }
-
-                        // Mark in-flight and spawn
-                        in_flight
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .insert(key_str.clone());
-                        tracing::info!("[{}] dispatching workflow", issue_key);
-
-                        let completed_clone = Arc::clone(&completed);
-                        let in_flight_clone = Arc::clone(&in_flight);
-                        let permanently_failed_clone = Arc::clone(&permanently_failed);
-                        let file_lock_clone = Arc::clone(&file_lock);
-                        let data_root_clone = data_root.clone();
-                        let key_str_clone = key_str.clone();
-                        let failed_path = data_root.join("failed.json");
-                        let completed_path = data_root.join("completed.json");
-                        let steps_clone = Arc::clone(&workflow_steps);
-
-                        tokio::spawn(async move {
-                            let result =
-                                run_issue(&issue_key, &data_root_clone, &steps_clone).await;
-                            in_flight_clone
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .remove(&key_str_clone);
-
-                            match result {
-                                Ok(()) => {
-                                    tracing::info!("[{}] workflow completed", issue_key);
-                                    // Add to completed set and persist
-                                    completed_clone
-                                        .lock()
-                                        .unwrap_or_else(|e| e.into_inner())
-                                        .insert(key_str_clone.clone());
-                                    append_completed(
-                                        &completed_path,
-                                        &key_str_clone,
-                                        &file_lock_clone,
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::error!("[{}] workflow FAILED: {}", issue_key, e);
-                                    // Prevent re-dispatch within this daemon run (in-memory only)
-                                    permanently_failed_clone
-                                        .lock()
-                                        .unwrap_or_else(|e| e.into_inner())
-                                        .insert(key_str_clone.clone());
-                                    append_failed(
-                                        &failed_path,
-                                        &key_str_clone,
-                                        &e.to_string(),
-                                        &file_lock_clone,
-                                    );
-                                }
+            let mut seen_numbers = std::collections::HashSet::new();
+            let mut issues = Vec::new();
+            for creator in &config.allowed_issue_creators {
+                match list_assigned_issues(
+                    &client,
+                    &repo_cfg.owner,
+                    &repo_cfg.repo,
+                    &config.assigned_to,
+                    creator,
+                    &token,
+                )
+                .await
+                {
+                    Err(e) => {
+                        tracing::error!(
+                            "GitHub API error for {}/{} (creator={}): {}",
+                            repo_cfg.owner,
+                            repo_cfg.repo,
+                            creator,
+                            e
+                        );
+                    }
+                    Ok(page) => {
+                        for issue in page {
+                            if seen_numbers.insert(issue.number) {
+                                issues.push(issue);
                             }
-                        });
+                        }
                     }
                 }
+            }
+            for issue in issues {
+                let key_str = format!("{}/{}/{}", repo_cfg.owner, repo_cfg.repo, issue.number);
+                let issue_key = IssueKey {
+                    owner: repo_cfg.owner.clone(),
+                    repo: repo_cfg.repo.clone(),
+                    number: issue.number,
+                };
+
+                // Skip if completed
+                if completed
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(&key_str)
+                {
+                    continue;
+                }
+                // Skip if permanently failed this run
+                if permanently_failed
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(&key_str)
+                {
+                    continue;
+                }
+                // Skip if in-flight
+                if in_flight
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(&key_str)
+                {
+                    continue;
+                }
+
+                // Mark in-flight and spawn
+                in_flight
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(key_str.clone());
+                tracing::info!("[{}] dispatching workflow", issue_key);
+
+                let completed_clone = Arc::clone(&completed);
+                let in_flight_clone = Arc::clone(&in_flight);
+                let permanently_failed_clone = Arc::clone(&permanently_failed);
+                let file_lock_clone = Arc::clone(&file_lock);
+                let data_root_clone = data_root.clone();
+                let key_str_clone = key_str.clone();
+                let failed_path = data_root.join("failed.json");
+                let completed_path = data_root.join("completed.json");
+                let steps_clone = Arc::clone(&workflow_steps);
+
+                tokio::spawn(async move {
+                    let result = run_issue(&issue_key, &data_root_clone, &steps_clone).await;
+                    in_flight_clone
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&key_str_clone);
+
+                    match result {
+                        Ok(()) => {
+                            tracing::info!("[{}] workflow completed", issue_key);
+                            // Add to completed set and persist
+                            completed_clone
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(key_str_clone.clone());
+                            append_completed(&completed_path, &key_str_clone, &file_lock_clone);
+                        }
+                        Err(e) => {
+                            tracing::error!("[{}] workflow FAILED: {}", issue_key, e);
+                            // Prevent re-dispatch within this daemon run (in-memory only)
+                            permanently_failed_clone
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(key_str_clone.clone());
+                            append_failed(
+                                &failed_path,
+                                &key_str_clone,
+                                &e.to_string(),
+                                &file_lock_clone,
+                            );
+                        }
+                    }
+                });
             }
         }
     }
