@@ -22,14 +22,7 @@ async fn main() {
         }
     };
 
-    // Load workflow
-    let workflow_steps = match crate::workflow::load(&config.workflow_file) {
-        Ok(steps) => steps,
-        Err(e) => {
-            eprintln!("ERROR: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let workflow_steps = config.steps.clone();
 
     // Init tracing (after config so RUST_LOG is readable)
     tracing_subscriber::fmt()
