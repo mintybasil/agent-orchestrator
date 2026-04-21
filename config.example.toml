@@ -1,5 +1,8 @@
 poll_interval_secs = 60
 assigned_to = "your-github-username"
+# Whitelist of GitHub usernames allowed to trigger the workflow via issue creation.
+# If empty, all issue creators are allowed (no restriction).
+allowed_issue_creators = ["your-github-username"]
 
 [[repos]]
 owner = "your-org"

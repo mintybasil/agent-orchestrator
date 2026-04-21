@@ -8,6 +8,7 @@ pub struct Config {
     pub repos: Vec<RepoConfig>,
     #[serde(default)]
     pub steps: Vec<Step>,
+    pub allowed_issue_creators: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -25,6 +26,11 @@ impl Config {
         anyhow::ensure!(
             !config.steps.is_empty(),
             "config {:?} contains no [[steps]]",
+            path
+        );
+        anyhow::ensure!(
+            !config.allowed_issue_creators.is_empty(),
+            "config {:?} must list at least one allowed_issue_creators entry",
             path
         );
         Ok(config)
