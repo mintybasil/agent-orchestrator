@@ -69,10 +69,61 @@ To add a step:
 2. Set `output_file` to a unique filename (e.g. `step_02_pr.md`).
 3. Use `{{step_N_output}}` (0-indexed) in `prompt_template` to reference a
    prior step's output path.
-4. Set `validation: Validation::FileNonEmpty` (currently the only variant).
+4. Populate `pre_hooks` and `post_hooks` with `Hook` variants as needed.
 
 The runner wires prior-step output paths into the template context
 automatically, in order.
+
+## Pre/post hooks
+
+Each `Step` carries two hook lists that bracket the hermes invocation:
+
+```
+pre_hooks  -> hermes invoke -> post_hooks
+```
+
+Hooks run in declaration order. A non-zero exit (Script) or assertion failure
+(FileNonEmpty) aborts the step immediately — identical to the old validation
+failure path.
+
+Available `Hook` variants (defined in `src/workflow.rs`):
+
+| Variant | Effect |
+|---|---|
+| `Hook::FileNonEmpty(path)` | Fail if the file at `path` is absent or zero bytes. Template placeholders (e.g. `{{output_path}}`) are resolved at runtime. |
+| `Hook::Script { command, args }` | Spawn `command` with `args`. Stdout/stderr are streamed to tracing. Fail on non-zero exit. Args may contain template placeholders. |
+
+### Example: add a linter post-hook
+
+```rust
+Step {
+    name: "implement",
+    ...,
+    post_hooks: vec![
+        Hook::FileNonEmpty("{{output_path}}".to_string()),
+        Hook::Script {
+            command: "cargo".to_string(),
+            args: vec!["clippy".to_string(), "--".to_string(), "-D".to_string(), "warnings".to_string()],
+        },
+    ],
+}
+```
+
+### Example: assert a precondition before a step
+
+```rust
+Step {
+    name: "publish",
+    ...,
+    pre_hooks: vec![
+        Hook::Script {
+            command: "scripts/check-changelog.sh".to_string(),
+            args: vec!["{{issue_number}}".to_string()],
+        },
+    ],
+    post_hooks: vec![...],
+}
+```
 
 ## PR and branching rules
 
@@ -88,14 +139,6 @@ automatically, in order.
 - `hermes` must be on `PATH` (validated on startup, hard exit if missing).
 - `data/` must be writable (validated on startup, hard exit if not).
 - Config file must be readable TOML (validated on startup, hard exit if not).
-
-## Adding a new validation type
-
-`Validation` is an enum in `src/workflow.rs`. To add a new variant:
-
-1. Add the variant to the `Validation` enum.
-2. Add a match arm in `runner.rs` under the `match step.validation` block.
-3. Add a unit test in `src/template.rs` or a new test module as appropriate.
 
 ## Debugging a failed issue
 
