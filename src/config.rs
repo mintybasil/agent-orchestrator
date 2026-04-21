@@ -1,10 +1,13 @@
 use anyhow::Context;
+use crate::workflow::Step;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
     pub poll_interval_secs: u64,
     pub assigned_to: String,
     pub repos: Vec<RepoConfig>,
+    #[serde(default)]
+    pub steps: Vec<Step>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -17,8 +20,10 @@ impl Config {
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config from {:?}", path))?;
-        toml::from_str(&text)
-            .with_context(|| format!("parsing config from {:?}", path))
+        let config: Self = toml::from_str(&text)
+            .with_context(|| format!("parsing config from {:?}", path))?;
+        anyhow::ensure!(!config.steps.is_empty(), "config {:?} contains no [[steps]]", path);
+        Ok(config)
     }
 }
 
