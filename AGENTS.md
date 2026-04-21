@@ -12,7 +12,7 @@ cargo build --release
 # Lint
 cargo clippy
 
-# Run tests (3 unit tests in src/template.rs)
+# Run tests (unit tests in src/template.rs and src/workflow.rs)
 cargo test
 
 # Type-check only (faster than a full build)
@@ -35,8 +35,8 @@ src/
   poller.rs     -- tokio poll loop, concurrency dedup, JSON persistence
   runner.rs     -- Per-issue sequential step executor
   template.rs   -- {{key}} placeholder renderer + unit tests
-  workflow.rs   -- Hardcoded 2-step workflow definition
-config.toml     -- Sample config (do not commit real tokens or org names)
+  workflow.rs   -- Step and Hook types; loaded by config.rs
+config.toml     -- All config including [[steps]] workflow definition (do not commit real tokens or org names)
 data/           -- Runtime data dir (gitignored); created on first run
 ```
 
@@ -62,8 +62,10 @@ until GitHub returns an empty page. `per_page=100` minimises round trips.
 
 ## Extending the workflow
 
-Workflow steps are defined in `workflow.toml` (path configured via `workflow_file` in `config.toml`).
-No recompile needed — edit `workflow.toml` and restart the daemon.
+Workflow steps live directly in `config.toml` as `[[steps]]` tables — no separate file, no recompile needed. Edit `config.toml` and restart the daemon.
+
+To run a different workflow, run a separate daemon instance pointing at a different config file:
+`agent-orchestrator --config other-config.toml`
 
 ### Step format
 
