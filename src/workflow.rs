@@ -57,3 +57,82 @@ pub fn load(path: &std::path::Path) -> anyhow::Result<Vec<Step>> {
     anyhow::ensure!(!wf.steps.is_empty(), "workflow file {:?} contains no steps", path);
     Ok(wf.steps)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn write_temp(content: &str) -> NamedTempFile {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f
+    }
+
+    #[test]
+    fn load_valid_workflow() {
+        let toml = r#"
+[[steps]]
+name = "triage"
+prompt_template = "Do triage for {{owner}}/{{repo}} issue {{issue_number}}. Output: {{output_path}}."
+output_file = "step_00_triage.md"
+
+[[steps.post_hooks]]
+type = "file_non_empty"
+path = "{{output_path}}"
+"#;
+        let f = write_temp(toml);
+        let steps = load(f.path()).unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].name, "triage");
+        assert_eq!(steps[0].output_file, "step_00_triage.md");
+        assert_eq!(steps[0].post_hooks.len(), 1);
+        assert!(matches!(steps[0].post_hooks[0], Hook::FileNonEmpty { .. }));
+    }
+
+    #[test]
+    fn load_script_hook() {
+        let toml = r#"
+[[steps]]
+name = "lint"
+prompt_template = "Lint the code."
+output_file = "step_00_lint.md"
+
+[[steps.post_hooks]]
+type = "script"
+command = "cargo"
+args = ["clippy"]
+"#;
+        let f = write_temp(toml);
+        let steps = load(f.path()).unwrap();
+        assert_eq!(steps.len(), 1);
+        match &steps[0].post_hooks[0] {
+            Hook::Script { command, args } => {
+                assert_eq!(command, "cargo");
+                assert_eq!(args, &["clippy"]);
+            }
+            other => panic!("unexpected hook: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn load_empty_steps_errors() {
+        let toml = "steps = []\n";
+        let f = write_temp(toml);
+        let err = load(f.path()).unwrap_err();
+        assert!(err.to_string().contains("no steps"));
+    }
+
+    #[test]
+    fn load_malformed_toml_errors() {
+        let f = write_temp("not valid toml ][[\n");
+        assert!(load(f.path()).is_err());
+    }
+
+    #[test]
+    fn load_missing_file_errors() {
+        let result = load(std::path::Path::new("/nonexistent/workflow.toml"));
+        assert!(result.is_err());
+    }
+}
