@@ -1,5 +1,6 @@
 poll_interval_secs = 60
 assigned_to = "zeroklaw"
+workflow_file = "workflow.toml"
 
 [[repos]]
 owner = "zerokrab"

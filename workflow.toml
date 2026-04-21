@@ -1,0 +1,21 @@
+# Agent workflow definition.
+# Each [[steps]] entry is a sequential step executed by the agent.
+# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
+
+[[steps]]
+name = "triage"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
+output_file = "step_00_triage.md"
+
+[[steps.post_hooks]]
+type = "file_non_empty"
+path = "{{output_path}}"
+
+[[steps]]
+name = "implement"
+prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary of what you did to {{output_path}}."
+output_file = "step_01_implement.md"
+
+[[steps.post_hooks]]
+type = "file_non_empty"
+path = "{{output_path}}"
