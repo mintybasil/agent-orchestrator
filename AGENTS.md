@@ -62,68 +62,47 @@ until GitHub returns an empty page. `per_page=100` minimises round trips.
 
 ## Extending the workflow
 
-All workflow steps live in `src/workflow.rs` in the `workflow()` function.
-To add a step:
+Workflow steps are defined in `workflow.toml` (path configured via `workflow_file` in `config.toml`).
+No recompile needed — edit `workflow.toml` and restart the daemon.
 
-1. Append a `Step` struct to the returned `Vec`.
-2. Set `output_file` to a unique filename (e.g. `step_02_pr.md`).
-3. Use `{{step_N_output}}` (0-indexed) in `prompt_template` to reference a
-   prior step's output path.
-4. Populate `pre_hooks` and `post_hooks` with `Hook` variants as needed.
+### Step format
 
-The runner wires prior-step output paths into the template context
-automatically, in order.
+```toml
+[[steps]]
+name = "my-step"
+prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}."
+output_file = "step_NN_my-step.md"
 
-## Pre/post hooks
+# Optional pre-hooks (run before hermes)
+[[steps.pre_hooks]]
+type = "script"
+command = "scripts/validate.sh"
+args = ["{{issue_number}}"]
 
-Each `Step` carries two hook lists that bracket the hermes invocation:
-
+# Optional post-hooks (run after hermes)
+[[steps.post_hooks]]
+type = "file_non_empty"
+path = "{{output_path}}"
 ```
-pre_hooks  -> hermes invoke -> post_hooks
-```
 
-Hooks run in declaration order. A non-zero exit (Script) or assertion failure
-(FileNonEmpty) aborts the step immediately — identical to the old validation
-failure path.
+### Template placeholders
 
-Available `Hook` variants (defined in `src/workflow.rs`):
-
-| Variant | Effect |
+| Placeholder | Value |
 |---|---|
-| `Hook::FileNonEmpty(path)` | Fail if the file at `path` is absent or zero bytes. Template placeholders (e.g. `{{output_path}}`) are resolved at runtime. |
-| `Hook::Script { command, args }` | Spawn `command` with `args`. Stdout/stderr are streamed to tracing. Fail on non-zero exit. Args may contain template placeholders. |
+| `{{owner}}` | Repository owner |
+| `{{repo}}` | Repository name |
+| `{{issue_number}}` | GitHub issue number |
+| `{{output_path}}` | Full path to this step's output file |
+| `{{step_N_output}}` | Full path to step N's output file (0-indexed) |
 
-### Example: add a linter post-hook
+### Hook types
 
-```rust
-Step {
-    name: "implement",
-    ...,
-    post_hooks: vec![
-        Hook::FileNonEmpty("{{output_path}}".to_string()),
-        Hook::Script {
-            command: "cargo".to_string(),
-            args: vec!["clippy".to_string(), "--".to_string(), "-D".to_string(), "warnings".to_string()],
-        },
-    ],
-}
-```
+| `type` | Fields | Effect |
+|---|---|---|
+| `file_non_empty` | `path` (string, supports placeholders) | Fail if file is absent or zero bytes |
+| `script` | `command` (string), `args` (array of strings, support placeholders) | Spawn process; fail on non-zero exit |
 
-### Example: assert a precondition before a step
-
-```rust
-Step {
-    name: "publish",
-    ...,
-    pre_hooks: vec![
-        Hook::Script {
-            command: "scripts/check-changelog.sh".to_string(),
-            args: vec!["{{issue_number}}".to_string()],
-        },
-    ],
-    post_hooks: vec![...],
-}
-```
+Hooks run in declaration order. A failure aborts the step and marks the issue as failed.
 
 ## PR and branching rules
 
