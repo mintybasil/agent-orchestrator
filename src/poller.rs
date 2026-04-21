@@ -60,9 +60,7 @@ pub async fn run_poll_loop(
                     for issue in issues {
                         // Filter by allowed_issue_creators whitelist if configured.
                         if !config.allowed_issue_creators.is_empty()
-                            && !config
-                                .allowed_issue_creators
-                                .contains(&issue.user.login)
+                            && !config.allowed_issue_creators.contains(&issue.user.login)
                         {
                             tracing::warn!(
                                 "[{}/{}/{}] skipping issue from non-whitelisted creator '{}'",
