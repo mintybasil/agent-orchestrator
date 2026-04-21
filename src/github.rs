@@ -5,7 +5,6 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Issue {
     pub number: u64,
-    pub title: String,
 }
 
 pub async fn list_assigned_issues(

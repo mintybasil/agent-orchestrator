@@ -60,7 +60,7 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path) -> Result<()> {
         // hermes::invoke is sync; run it in a blocking thread pool.
         let prompt_clone = prompt.clone();
         let error_path_clone = error_path.clone();
-        let result = tokio::task::spawn_blocking(move || invoke(&prompt_clone, &error_path_clone))
+        let _result = tokio::task::spawn_blocking(move || invoke(&prompt_clone, &error_path_clone))
             .await
             .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
 

@@ -26,6 +26,7 @@ pub async fn run_poll_loop(
     completed: Arc<Mutex<HashSet<String>>>,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let client = Client::new();
     let mut ticker = interval(Duration::from_secs(config.poll_interval_secs));
 
@@ -52,6 +53,10 @@ pub async fn run_poll_loop(
                         if completed.lock().unwrap().contains(&key_str) {
                             continue;
                         }
+                        // Skip if permanently failed this run
+                        if permanently_failed.lock().unwrap().contains(&key_str) {
+                            continue;
+                        }
                         // Skip if in-flight
                         if in_flight.lock().unwrap().contains(&key_str) {
                             continue;
@@ -63,6 +68,7 @@ pub async fn run_poll_loop(
 
                         let completed_clone = Arc::clone(&completed);
                         let in_flight_clone = Arc::clone(&in_flight);
+                        let permanently_failed_clone = Arc::clone(&permanently_failed);
                         let data_root_clone = data_root.clone();
                         let key_str_clone = key_str.clone();
                         let failed_path = data_root.join("failed.json");
@@ -81,6 +87,8 @@ pub async fn run_poll_loop(
                                 }
                                 Err(e) => {
                                     tracing::error!("[{}] workflow FAILED: {}", issue_key, e);
+                                    // Prevent re-dispatch within this daemon run (in-memory only)
+                                    permanently_failed_clone.lock().unwrap().insert(key_str_clone.clone());
                                     append_failed(&failed_path, &key_str_clone, &e.to_string());
                                 }
                             }
