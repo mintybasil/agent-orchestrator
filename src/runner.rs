@@ -1,6 +1,6 @@
 use crate::hermes::invoke;
 use crate::template::render;
-use crate::workflow::{Hook, workflow};
+use crate::workflow::{Hook, Step};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
@@ -26,7 +26,7 @@ impl std::fmt::Display for IssueKey {
 /// On failure writes a human-readable message to `error_path` and returns Err.
 fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Result<()> {
     match hook {
-        Hook::FileNonEmpty(raw_path) => {
+        Hook::FileNonEmpty { path: raw_path } => {
             let path = render(raw_path, vars);
             match fs::metadata(&path) {
                 Ok(m) if m.len() > 0 => Ok(()),
@@ -93,16 +93,15 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
 /// Run all workflow steps for a single issue.
 /// Returns Ok(()) if all steps succeeded, Err if any step failed.
 /// data_root is the base data/ directory (e.g. PathBuf::from("data")).
-pub async fn run_issue(key: &IssueKey, data_root: &Path) -> Result<()> {
+pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Result<()> {
     let issue_dir = data_root
         .join(&key.owner)
         .join(&key.repo)
         .join(key.number.to_string());
     fs::create_dir_all(&issue_dir)?;
 
-    let steps = workflow();
     for (idx, step) in steps.iter().enumerate() {
-        let output_path = issue_dir.join(step.output_file);
+        let output_path = issue_dir.join(&step.output_file);
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
 
         // Build template variables: standard vars + paths to all prior step outputs.
@@ -116,7 +115,7 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path) -> Result<()> {
             ),
         ];
         for prior in 0..idx {
-            let prior_path = issue_dir.join(steps[prior].output_file);
+            let prior_path = issue_dir.join(&steps[prior].output_file);
             var_pairs.push((
                 format!("step_{}_output", prior),
                 prior_path.to_string_lossy().into_owned(),
@@ -138,7 +137,7 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path) -> Result<()> {
         tracing::info!("[{}] {}: started", key, step.name);
 
         // hermes::invoke is sync; run it in a blocking thread pool.
-        let prompt = render(step.prompt_template, &vars);
+        let prompt = render(&step.prompt_template, &vars);
         let error_path_clone = error_path.clone();
         tokio::task::spawn_blocking(move || invoke(&prompt, &error_path_clone))
             .await

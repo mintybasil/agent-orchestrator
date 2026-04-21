@@ -10,6 +10,7 @@ use tokio::time::{Duration, interval};
 use crate::config::Config;
 use crate::github::list_assigned_issues;
 use crate::runner::{IssueKey, run_issue};
+use crate::workflow;
 
 #[derive(Serialize, Deserialize)]
 struct FailedEntry {
@@ -23,12 +24,14 @@ pub async fn run_poll_loop(
     token: String,
     data_root: PathBuf,
     completed: Arc<Mutex<HashSet<String>>>,
+    workflow_steps: Vec<workflow::Step>,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let file_lock: Arc<std::sync::Mutex<()>> = Arc::new(std::sync::Mutex::new(()));
     let client = Client::new();
     let mut ticker = interval(Duration::from_secs(config.poll_interval_secs));
+    let workflow_steps = std::sync::Arc::new(workflow_steps);
 
     loop {
         ticker.tick().await;
@@ -103,9 +106,11 @@ pub async fn run_poll_loop(
                         let key_str_clone = key_str.clone();
                         let failed_path = data_root.join("failed.json");
                         let completed_path = data_root.join("completed.json");
+                        let steps_clone = Arc::clone(&workflow_steps);
 
                         tokio::spawn(async move {
-                            let result = run_issue(&issue_key, &data_root_clone).await;
+                            let result =
+                                run_issue(&issue_key, &data_root_clone, &steps_clone).await;
                             in_flight_clone
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner())
