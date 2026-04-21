@@ -11,7 +11,6 @@ repo = "bento-bench"
 
 # Workflow steps executed sequentially for each assigned issue.
 # Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
-# Note: pre/post hooks are defined but not yet implemented by the orchestrator.
 
 [[steps]]
 name = "Plan"
@@ -19,45 +18,17 @@ prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Us
 output_file = "{{output_path}}/{{issue_number}}/plan.md"
 profile = "pm"
 
-[[steps.pre_hooks]]
-type = "fetch_issue"
-description = "Fetch issue into local copy using GH cli"
-
-[[steps.pre_hooks]]
-type = "add_emoji_to_issue"
-description = "Add emoji to issue"
-
-[[steps.post_hooks]]
-type = "file_non_empty"
-path = "{{output_path}}/{{issue_number}}/plan.md"
-
 [[steps]]
 name = "Implement"
 prompt_template = "Implement the plan at {{output_path}}/{{issue_number}}/plan.md using the subagent-driven-development skill. Write a summary of what you did to {{output_path}}/{{issue_number}}/implementation.md."
 output_file = "{{output_path}}/{{issue_number}}/implementation.md"
 profile = "swe"
 
-[[steps.pre_hooks]]
-type = "ensure_repo_ready"
-description = "Ensure repo is cloned, up to date, worktree created"
-
-[[steps.post_hooks]]
-type = "file_non_empty"
-path = "{{output_path}}/{{issue_number}}/implementation.md"
-
 [[steps]]
 name = "Review"
 prompt_template = "Use the requesting-code-review skill to produce {{output_path}}/{{issue_number}}/review.md."
 output_file = "{{output_path}}/{{issue_number}}/review.md"
 profile = "swe"
-
-[[steps.post_hooks]]
-type = "file_non_empty"
-path = "{{output_path}}/{{issue_number}}/review.md"
-
-[[steps.post_hooks]]
-type = "skip_next_if_no_issues"
-description = "Skip Fixer if no issues found"
 
 [[steps]]
 name = "Remedy"
@@ -70,15 +41,3 @@ name = "Finalize"
 prompt_template = "Use the finalize-task skill."
 output_file = "{{output_path}}/{{issue_number}}/finalize.md"
 profile = "pm"
-
-[[steps.post_hooks]]
-type = "run_linters"
-description = "Run linters"
-
-[[steps.post_hooks]]
-type = "commit_push_open_pr"
-description = "Commit and push, open PR"
-
-[[steps.post_hooks]]
-type = "poll_ci"
-description = "Poll for CI, trigger remedy on failure"
