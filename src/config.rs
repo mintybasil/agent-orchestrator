@@ -17,13 +17,15 @@ impl Config {
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config from {:?}", path))?;
-        toml::from_str(&text)
-            .with_context(|| format!("parsing config from {:?}", path))
+        toml::from_str(&text).with_context(|| format!("parsing config from {:?}", path))
     }
 }
 
 #[derive(clap::Parser, Debug)]
-#[command(name = "agent-orchestrator", about = "Poll GitHub and run agent workflows")]
+#[command(
+    name = "agent-orchestrator",
+    about = "Poll GitHub and run agent workflows"
+)]
 pub struct Cli {
     #[arg(long, default_value = "config.toml")]
     pub config: std::path::PathBuf,

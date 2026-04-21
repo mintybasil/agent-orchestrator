@@ -1,15 +1,15 @@
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-use std::path::{Path, PathBuf};
-use tokio::time::{interval, Duration};
-use reqwest::Client;
 use anyhow::Result;
 use chrono::Utc;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use tokio::time::{Duration, interval};
 
 use crate::config::Config;
 use crate::github::list_assigned_issues;
-use crate::runner::{run_issue, IssueKey};
+use crate::runner::{IssueKey, run_issue};
 
 #[derive(Serialize, Deserialize)]
 struct FailedEntry {
@@ -35,14 +35,28 @@ pub async fn run_poll_loop(
         tracing::info!("poll tick: checking {} repos", config.repos.len());
 
         for repo_cfg in &config.repos {
-            match list_assigned_issues(&client, &repo_cfg.owner, &repo_cfg.repo, &config.assigned_to, &token).await {
+            match list_assigned_issues(
+                &client,
+                &repo_cfg.owner,
+                &repo_cfg.repo,
+                &config.assigned_to,
+                &token,
+            )
+            .await
+            {
                 Err(e) => {
-                    tracing::error!("GitHub API error for {}/{}: {}", repo_cfg.owner, repo_cfg.repo, e);
+                    tracing::error!(
+                        "GitHub API error for {}/{}: {}",
+                        repo_cfg.owner,
+                        repo_cfg.repo,
+                        e
+                    );
                     continue;
                 }
                 Ok(issues) => {
                     for issue in issues {
-                        let key_str = format!("{}/{}/{}", repo_cfg.owner, repo_cfg.repo, issue.number);
+                        let key_str =
+                            format!("{}/{}/{}", repo_cfg.owner, repo_cfg.repo, issue.number);
                         let issue_key = IssueKey {
                             owner: repo_cfg.owner.clone(),
                             repo: repo_cfg.repo.clone(),
@@ -50,20 +64,35 @@ pub async fn run_poll_loop(
                         };
 
                         // Skip if completed
-                        if completed.lock().unwrap_or_else(|e| e.into_inner()).contains(&key_str) {
+                        if completed
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains(&key_str)
+                        {
                             continue;
                         }
                         // Skip if permanently failed this run
-                        if permanently_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(&key_str) {
+                        if permanently_failed
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains(&key_str)
+                        {
                             continue;
                         }
                         // Skip if in-flight
-                        if in_flight.lock().unwrap_or_else(|e| e.into_inner()).contains(&key_str) {
+                        if in_flight
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains(&key_str)
+                        {
                             continue;
                         }
 
                         // Mark in-flight and spawn
-                        in_flight.lock().unwrap_or_else(|e| e.into_inner()).insert(key_str.clone());
+                        in_flight
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(key_str.clone());
                         tracing::info!("[{}] dispatching workflow", issue_key);
 
                         let completed_clone = Arc::clone(&completed);
@@ -77,20 +106,38 @@ pub async fn run_poll_loop(
 
                         tokio::spawn(async move {
                             let result = run_issue(&issue_key, &data_root_clone).await;
-                            in_flight_clone.lock().unwrap_or_else(|e| e.into_inner()).remove(&key_str_clone);
+                            in_flight_clone
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .remove(&key_str_clone);
 
                             match result {
                                 Ok(()) => {
                                     tracing::info!("[{}] workflow completed", issue_key);
                                     // Add to completed set and persist
-                                    completed_clone.lock().unwrap_or_else(|e| e.into_inner()).insert(key_str_clone.clone());
-                                    append_completed(&completed_path, &key_str_clone, &file_lock_clone);
+                                    completed_clone
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .insert(key_str_clone.clone());
+                                    append_completed(
+                                        &completed_path,
+                                        &key_str_clone,
+                                        &file_lock_clone,
+                                    );
                                 }
                                 Err(e) => {
                                     tracing::error!("[{}] workflow FAILED: {}", issue_key, e);
                                     // Prevent re-dispatch within this daemon run (in-memory only)
-                                    permanently_failed_clone.lock().unwrap_or_else(|e| e.into_inner()).insert(key_str_clone.clone());
-                                    append_failed(&failed_path, &key_str_clone, &e.to_string(), &file_lock_clone);
+                                    permanently_failed_clone
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .insert(key_str_clone.clone());
+                                    append_failed(
+                                        &failed_path,
+                                        &key_str_clone,
+                                        &e.to_string(),
+                                        &file_lock_clone,
+                                    );
                                 }
                             }
                         });

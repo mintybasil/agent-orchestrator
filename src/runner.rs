@@ -1,6 +1,6 @@
 use crate::hermes::invoke;
 use crate::template::render;
-use crate::workflow::{workflow, Hook};
+use crate::workflow::{Hook, workflow};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
@@ -46,11 +46,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
         Hook::Script { command, args } => {
             let resolved_args: Vec<String> = args.iter().map(|a| render(a, vars)).collect();
 
-            tracing::info!(
-                "[hook Script] {} {}",
-                command,
-                resolved_args.join(" ")
-            );
+            tracing::info!("[hook Script] {} {}", command, resolved_args.join(" "));
 
             let mut child = Command::new(command)
                 .args(&resolved_args)
@@ -86,10 +82,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
                 Ok(())
             } else {
                 let code = status.code().unwrap_or(-1);
-                let msg = format!(
-                    "hook Script: `{}` exited with code {}",
-                    command, code
-                );
+                let msg = format!("hook Script: `{}` exited with code {}", command, code);
                 let _ = fs::write(error_path, &msg);
                 anyhow::bail!("{}", msg);
             }

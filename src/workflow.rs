@@ -59,9 +59,7 @@ pub fn workflow() -> Vec<Step> {
                               Write a triage summary to {{output_path}}.",
             output_file: "step_00_triage.md",
             pre_hooks: vec![],
-            post_hooks: vec![
-                Hook::FileNonEmpty("{{output_path}}".to_string()),
-            ],
+            post_hooks: vec![Hook::FileNonEmpty("{{output_path}}".to_string())],
         },
         Step {
             name: "implement",
@@ -70,9 +68,7 @@ pub fn workflow() -> Vec<Step> {
                               Write a summary of what you did to {{output_path}}.",
             output_file: "step_01_implement.md",
             pre_hooks: vec![],
-            post_hooks: vec![
-                Hook::FileNonEmpty("{{output_path}}".to_string()),
-            ],
+            post_hooks: vec![Hook::FileNonEmpty("{{output_path}}".to_string())],
         },
     ]
 }

@@ -1,5 +1,5 @@
-use clap::Parser;
 use crate::config::Cli;
+use clap::Parser;
 
 mod config;
 mod github;
@@ -53,9 +53,7 @@ async fn main() {
     let _ = std::fs::remove_file(&probe_path);
 
     // hermes on PATH
-    let hermes_check = std::process::Command::new("which")
-        .arg("hermes")
-        .output();
+    let hermes_check = std::process::Command::new("which").arg("hermes").output();
     match hermes_check {
         Ok(out) if out.status.success() => {}
         _ => {

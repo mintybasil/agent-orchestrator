@@ -28,7 +28,9 @@ pub fn invoke(prompt: &str, error_file: &Path) -> Result<()> {
                 match line {
                     Ok(l) => {
                         tracing::error!("[hermes stderr] {}", l);
-                        let mut cap = stderr_capture_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut cap = stderr_capture_clone
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         cap.push_str(&l);
                         cap.push('\n');
                     }
@@ -57,7 +59,10 @@ pub fn invoke(prompt: &str, error_file: &Path) -> Result<()> {
         Ok(())
     } else {
         let code = status.code().unwrap_or(-1);
-        let stderr_text = stderr_capture.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let stderr_text = stderr_capture
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if let Err(e) = std::fs::write(error_file, &stderr_text) {
             tracing::warn!("failed to write error file {:?}: {}", error_file, e);
         }
