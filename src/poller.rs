@@ -14,7 +14,6 @@ use crate::runner::{run_issue, IssueKey};
 #[derive(Serialize, Deserialize)]
 struct FailedEntry {
     key: String,
-    step: String,
     timestamp: String,
     error: String,
 }
@@ -27,6 +26,7 @@ pub async fn run_poll_loop(
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let file_lock: Arc<std::sync::Mutex<()>> = Arc::new(std::sync::Mutex::new(()));
     let client = Client::new();
     let mut ticker = interval(Duration::from_secs(config.poll_interval_secs));
 
@@ -50,25 +50,26 @@ pub async fn run_poll_loop(
                         };
 
                         // Skip if completed
-                        if completed.lock().unwrap().contains(&key_str) {
+                        if completed.lock().unwrap_or_else(|e| e.into_inner()).contains(&key_str) {
                             continue;
                         }
                         // Skip if permanently failed this run
-                        if permanently_failed.lock().unwrap().contains(&key_str) {
+                        if permanently_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(&key_str) {
                             continue;
                         }
                         // Skip if in-flight
-                        if in_flight.lock().unwrap().contains(&key_str) {
+                        if in_flight.lock().unwrap_or_else(|e| e.into_inner()).contains(&key_str) {
                             continue;
                         }
 
                         // Mark in-flight and spawn
-                        in_flight.lock().unwrap().insert(key_str.clone());
+                        in_flight.lock().unwrap_or_else(|e| e.into_inner()).insert(key_str.clone());
                         tracing::info!("[{}] dispatching workflow", issue_key);
 
                         let completed_clone = Arc::clone(&completed);
                         let in_flight_clone = Arc::clone(&in_flight);
                         let permanently_failed_clone = Arc::clone(&permanently_failed);
+                        let file_lock_clone = Arc::clone(&file_lock);
                         let data_root_clone = data_root.clone();
                         let key_str_clone = key_str.clone();
                         let failed_path = data_root.join("failed.json");
@@ -76,20 +77,20 @@ pub async fn run_poll_loop(
 
                         tokio::spawn(async move {
                             let result = run_issue(&issue_key, &data_root_clone).await;
-                            in_flight_clone.lock().unwrap().remove(&key_str_clone);
+                            in_flight_clone.lock().unwrap_or_else(|e| e.into_inner()).remove(&key_str_clone);
 
                             match result {
                                 Ok(()) => {
                                     tracing::info!("[{}] workflow completed", issue_key);
                                     // Add to completed set and persist
-                                    completed_clone.lock().unwrap().insert(key_str_clone.clone());
-                                    append_completed(&completed_path, &key_str_clone);
+                                    completed_clone.lock().unwrap_or_else(|e| e.into_inner()).insert(key_str_clone.clone());
+                                    append_completed(&completed_path, &key_str_clone, &file_lock_clone);
                                 }
                                 Err(e) => {
                                     tracing::error!("[{}] workflow FAILED: {}", issue_key, e);
                                     // Prevent re-dispatch within this daemon run (in-memory only)
-                                    permanently_failed_clone.lock().unwrap().insert(key_str_clone.clone());
-                                    append_failed(&failed_path, &key_str_clone, &e.to_string());
+                                    permanently_failed_clone.lock().unwrap_or_else(|e| e.into_inner()).insert(key_str_clone.clone());
+                                    append_failed(&failed_path, &key_str_clone, &e.to_string(), &file_lock_clone);
                                 }
                             }
                         });
@@ -101,7 +102,8 @@ pub async fn run_poll_loop(
 }
 
 /// Append a key to completed.json (read-modify-write the JSON array).
-fn append_completed(path: &Path, key: &str) {
+fn append_completed(path: &Path, key: &str, file_lock: &std::sync::Mutex<()>) {
+    let _guard = file_lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut set: Vec<String> = read_json_array(path);
     if !set.contains(&key.to_string()) {
         set.push(key.to_string());
@@ -112,14 +114,14 @@ fn append_completed(path: &Path, key: &str) {
 }
 
 /// Append a failure entry to failed.json.
-fn append_failed(path: &Path, key: &str, error: &str) {
+fn append_failed(path: &Path, key: &str, error: &str, file_lock: &std::sync::Mutex<()>) {
+    let _guard = file_lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut entries: Vec<FailedEntry> = match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => vec![],
     };
     entries.push(FailedEntry {
         key: key.to_string(),
-        step: String::new(), // step info is in the error string
         timestamp: Utc::now().to_rfc3339(),
         error: error.to_string(),
     });

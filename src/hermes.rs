@@ -1,7 +1,8 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 /// Invoke hermes with a single prompt argument.
 /// Streams stdout/stderr to tracing::info!/tracing::error! line by line.
@@ -15,7 +16,29 @@ pub fn invoke(prompt: &str, error_file: &Path) -> Result<()> {
         .spawn()
         .map_err(|e| anyhow::anyhow!("failed to spawn hermes: {}", e))?;
 
-    // Stream stdout
+    let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
+    // Drain stderr on a dedicated thread (concurrent with stdout drain)
+    let stderr_stream = child.stderr.take();
+    let stderr_capture_clone = Arc::clone(&stderr_capture);
+    let stderr_thread = std::thread::spawn(move || {
+        if let Some(stderr) = stderr_stream {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => {
+                        tracing::error!("[hermes stderr] {}", l);
+                        let mut cap = stderr_capture_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        cap.push_str(&l);
+                        cap.push('\n');
+                    }
+                    Err(e) => tracing::warn!("[hermes stderr read error] {}", e),
+                }
+            }
+        }
+    });
+
+    // Drain stdout in this thread
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
@@ -26,34 +49,18 @@ pub fn invoke(prompt: &str, error_file: &Path) -> Result<()> {
         }
     }
 
-    // Capture stderr separately (read after stdout done)
-    let stderr_bytes = if let Some(stderr) = child.stderr.take() {
-        let reader = BufReader::new(stderr);
-        let mut lines_text = String::new();
-        for line in reader.lines() {
-            match line {
-                Ok(l) => {
-                    tracing::error!("[hermes stderr] {}", l);
-                    lines_text.push_str(&l);
-                    lines_text.push('\n');
-                }
-                Err(e) => tracing::warn!("[hermes stderr read error] {}", e),
-            }
-        }
-        lines_text
-    } else {
-        String::new()
-    };
+    // Wait for stderr thread to finish
+    let _ = stderr_thread.join();
 
     let status = child.wait()?;
     if status.success() {
         Ok(())
     } else {
         let code = status.code().unwrap_or(-1);
-        // Write stderr to error file
-        if let Err(e) = std::fs::write(error_file, &stderr_bytes) {
+        let stderr_text = stderr_capture.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Err(e) = std::fs::write(error_file, &stderr_text) {
             tracing::warn!("failed to write error file {:?}: {}", error_file, e);
         }
-        bail!("hermes exited with code {}", code);
+        anyhow::bail!("hermes exited with code {}", code);
     }
 }
