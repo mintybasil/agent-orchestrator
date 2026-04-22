@@ -4,17 +4,22 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-/// Invoke hermes with the given prompt, always passing `--yolo`.
-/// If `profile` is Some, also passes `--profile <name>`.
+/// Invoke `hermes chat` with the given prompt, always passing `--yolo`.
+/// Passes `--profile <profile>` and, if `worktree` is true, `--worktree`.
 /// The prompt is passed via `-p <prompt>`.
 /// Streams stdout/stderr to tracing::info!/tracing::error! line by line.
 /// Returns Ok(()) on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns Err.
-pub fn invoke(prompt: &str, profile: Option<&str>, error_file: &Path) -> Result<()> {
+pub fn invoke(prompt: &str, profile: &str, worktree: bool, error_file: &Path) -> Result<()> {
     let mut cmd = Command::new("hermes");
-    cmd.arg("-p").arg(prompt).arg("--yolo");
-    if let Some(p) = profile {
-        cmd.arg("--profile").arg(p);
+    cmd.arg("chat")
+        .arg("-p")
+        .arg(prompt)
+        .arg("--yolo")
+        .arg("--profile")
+        .arg(profile);
+    if worktree {
+        cmd.arg("--worktree");
     }
     let mut child = cmd
         .stdout(Stdio::piped())

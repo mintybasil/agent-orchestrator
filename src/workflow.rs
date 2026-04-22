@@ -32,8 +32,10 @@ pub struct Step {
     #[serde(default)]
     pub post_hooks: Vec<Hook>,
     /// Optional hermes profile name passed via `--profile <name>`.
+    pub profile: String,
+    /// When true, passes `--worktree` to hermes.
     #[serde(default)]
-    pub profile: Option<String>,
+    pub worktree: bool,
 }
 
 #[cfg(test)]
