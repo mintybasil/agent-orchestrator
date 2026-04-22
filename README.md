@@ -10,9 +10,8 @@ configured user and runs a multi-step agent workflow against each one using
    repo, filtering by assignee and `state=open`.
 2. New issues (not yet completed or in-flight) are dispatched concurrently as
    tokio tasks.
-3. Each issue runs through the configured workflow — currently two steps:
-   **triage** then **implement** — by invoking `hermes` as a subprocess with a
-   rendered prompt.
+3. Each issue runs through the configured workflow steps sequentially by invoking
+   `hermes chat` as a subprocess with a rendered prompt.
 4. Step outputs are written to `data/{owner}/{repo}/{issue_number}/` and
    validated (non-empty file check) before the next step starts.
 5. Completed issue keys are persisted to `data/completed.json` so they survive
@@ -35,23 +34,79 @@ The binary is at `target/release/agent-orchestrator`.
 
 ## Configuration
 
-Copy and edit `config.toml`:
+Copy `config.example.toml` to `config.toml` and edit it:
 
 ```toml
 poll_interval_secs = 60
 assigned_to = "your-github-username"
+allowed_issue_creators = ["your-github-username"]
 
 [[repos]]
 owner = "your-org"
 repo  = "your-repo"
 
-[[repos]]
-owner = "your-org"
-repo  = "another-repo"
+[[steps]]
+name = "triage"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
+output_file = "step_00_triage.md"
+profile = "cto"
+
+[[steps]]
+name = "implement"
+prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary to {{output_path}}."
+output_file = "step_01_implement.md"
+profile = "cto"
 ```
 
-All fields are required. `assigned_to` is matched against the GitHub assignee
-login for open issues.
+### Step fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Human-readable step name (used in log output and error filenames) |
+| `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
+| `output_file` | string | yes | Filename written under the issue's data directory |
+| `profile` | string | yes | Hermes profile passed via `--profile` |
+| `worktree` | bool | no | When `true`, passes `--worktree` to hermes (default: `false`) |
+| `provider` | string | no | Passed to hermes via `--provider` |
+| `model` | string | no | Passed to hermes via `--model` |
+
+### Hermes invocation
+
+Each step runs:
+
+```
+hermes chat -p <prompt> --yolo --profile <profile> [--worktree] [--provider <provider>] [--model <model>]
+```
+
+### Template placeholders
+
+| Placeholder | Value |
+|---|---|
+| `{{owner}}` | Repository owner |
+| `{{repo}}` | Repository name |
+| `{{issue_number}}` | GitHub issue number |
+| `{{output_path}}` | Full path where this step must write its output |
+| `{{step_N_output}}` | Full path to step N's output file (0-indexed; for chaining steps) |
+
+### Hooks
+
+Steps support optional `pre_hooks` and `post_hooks`:
+
+```toml
+[[steps.post_hooks]]
+type = "file_non_empty"
+path = "{{output_path}}"
+
+[[steps.pre_hooks]]
+type = "script"
+command = "scripts/validate.sh"
+args = ["{{issue_number}}"]
+```
+
+| Hook type | Fields | Effect |
+|---|---|---|
+| `file_non_empty` | `path` | Fail if file is absent or zero bytes |
+| `script` | `command`, `args` | Spawn process; fail on non-zero exit |
 
 ## Running
 
@@ -79,26 +134,10 @@ data/
 ├── completed.json              # Array of "owner/repo/N" keys
 ├── failed.json                 # Array of {key, timestamp, error} objects
 └── {owner}/{repo}/{issue_number}/
-    ├── step_00_triage.md       # Triage step output
-    ├── step_01_implement.md    # Implement step output
+    ├── step_00_triage.md       # Step output files
+    ├── step_01_implement.md
     └── step_NN_<name>.error    # Stderr capture on failure (if any)
 ```
-
-## Workflow steps
-
-Steps are defined in `src/workflow.rs`. Each step receives a rendered prompt
-with the following template variables:
-
-| Variable | Description |
-|---|---|
-| `{{owner}}` | Repository owner |
-| `{{repo}}` | Repository name |
-| `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Full path where this step must write its output |
-| `{{step_N_output}}` | Full path to step N's output file (for chaining) |
-
-To add a step, append a `Step` struct to the `workflow()` function in
-`src/workflow.rs`.
 
 ## Environment variables
 
