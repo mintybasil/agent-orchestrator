@@ -87,8 +87,7 @@ different config file:
 ```toml
 [[steps]]
 name = "my-step"
-prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}."
-output_file = "step_NN_my-step.md"
+prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 profile = "cto"         # required: passed to hermes as --profile
 # worktree = true       # optional: passes --worktree to hermes
 # provider = "openai"   # optional: passes --provider to hermes
@@ -103,7 +102,7 @@ args = ["{{issue_number}}"]
 # Optional post-hooks (run after hermes)
 [[steps.post_hooks]]
 type = "file_non_empty"
-path = "{{output_path}}"
+path = "{{output_path}}/my-step.md"
 ```
 
 ### Template placeholders
@@ -113,8 +112,7 @@ path = "{{output_path}}"
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Full path to this step's output file |
-| `{{step_N_output}}` | Full path to step N's output file (0-indexed) |
+| `{{output_path}}` | Path to the issue data directory (`data/<owner>/<repo>/<issue_number>/`), created before the first step runs |
 
 ### Hook types
 
