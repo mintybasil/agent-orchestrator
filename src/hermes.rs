@@ -6,11 +6,19 @@ use std::sync::{Arc, Mutex};
 
 /// Invoke `hermes chat` with the given prompt, always passing `--yolo`.
 /// Passes `--profile <profile>` and, if `worktree` is true, `--worktree`.
+/// Optionally passes `--provider <provider>` and `--model <model>`.
 /// The prompt is passed via `-p <prompt>`.
 /// Streams stdout/stderr to tracing::info!/tracing::error! line by line.
 /// Returns Ok(()) on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns Err.
-pub fn invoke(prompt: &str, profile: &str, worktree: bool, error_file: &Path) -> Result<()> {
+pub fn invoke(
+    prompt: &str,
+    profile: &str,
+    worktree: bool,
+    provider: Option<&str>,
+    model: Option<&str>,
+    error_file: &Path,
+) -> Result<()> {
     let mut cmd = Command::new("hermes");
     cmd.arg("chat")
         .arg("-p")
@@ -20,6 +28,12 @@ pub fn invoke(prompt: &str, profile: &str, worktree: bool, error_file: &Path) ->
         .arg(profile);
     if worktree {
         cmd.arg("--worktree");
+    }
+    if let Some(provider) = provider {
+        cmd.arg("--provider").arg(provider);
+    }
+    if let Some(model) = model {
+        cmd.arg("--model").arg(model);
     }
     let mut child = cmd
         .stdout(Stdio::piped())

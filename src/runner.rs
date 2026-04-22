@@ -140,8 +140,19 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
         let prompt = render(&step.prompt_template, &vars);
         let profile = step.profile.clone();
         let worktree = step.worktree;
+        let provider = step.provider.clone();
+        let model = step.model.clone();
         let error_path_clone = error_path.clone();
-        tokio::task::spawn_blocking(move || invoke(&prompt, &profile, worktree, &error_path_clone))
+        tokio::task::spawn_blocking(move || {
+            invoke(
+                &prompt,
+                &profile,
+                worktree,
+                provider.as_deref(),
+                model.as_deref(),
+                &error_path_clone,
+            )
+        })
             .await
             .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
 

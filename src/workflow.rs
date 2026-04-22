@@ -36,6 +36,12 @@ pub struct Step {
     /// When true, passes `--worktree` to hermes.
     #[serde(default)]
     pub worktree: bool,
+    /// Optional provider passed to hermes via `--provider <provider>`.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional model passed to hermes via `--model <model>`.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[cfg(test)]
