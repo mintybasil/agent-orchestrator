@@ -138,10 +138,23 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
 
         // hermes::invoke is sync; run it in a blocking thread pool.
         let prompt = render(&step.prompt_template, &vars);
+        let profile = step.profile.clone();
+        let worktree = step.worktree;
+        let provider = step.provider.clone();
+        let model = step.model.clone();
         let error_path_clone = error_path.clone();
-        tokio::task::spawn_blocking(move || invoke(&prompt, &error_path_clone))
-            .await
-            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
+        tokio::task::spawn_blocking(move || {
+            invoke(
+                &prompt,
+                &profile,
+                worktree,
+                provider.as_deref(),
+                model.as_deref(),
+                &error_path_clone,
+            )
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {

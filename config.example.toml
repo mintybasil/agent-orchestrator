@@ -15,8 +15,16 @@ repo = "your-repo"
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
 output_file = "step_00_triage.md"
+profile = "cto"
+# worktree = true       # optional: passes --worktree to hermes
+# provider = "openai"   # optional: passes --provider to hermes
+# model = "o3"          # optional: passes --model to hermes
 
 [[steps]]
 name = "implement"
 prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary of what you did to {{output_path}}."
 output_file = "step_01_implement.md"
+profile = "cto"
+# worktree = true       # optional: passes --worktree to hermes
+# provider = "openai"   # optional: passes --provider to hermes
+# model = "o3"          # optional: passes --model to hermes
