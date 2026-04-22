@@ -21,7 +21,7 @@ pub fn invoke(
 ) -> Result<()> {
     let mut cmd = Command::new("hermes");
     cmd.arg("chat")
-        .arg("-p")
+        .arg("-q")
         .arg(prompt)
         .arg("--yolo")
         .arg("--profile")
