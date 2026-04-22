@@ -69,6 +69,7 @@ mod tests {
 name = "triage"
 prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
 output_file = "step_00_triage.md"
+profile = "test"
 
 [[steps.post_hooks]]
 type = "file_non_empty"
@@ -91,6 +92,7 @@ path = "{{output_path}}"
 name = "lint"
 prompt_template = "Lint the code."
 output_file = "step_00_lint.md"
+profile = "test"
 
 [[steps.post_hooks]]
 type = "script"

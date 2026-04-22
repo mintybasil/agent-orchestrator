@@ -153,8 +153,8 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
                 &error_path_clone,
             )
         })
-            .await
-            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {
