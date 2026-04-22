@@ -31,6 +31,17 @@ pub struct Step {
     /// Hooks that run *after* a successful hermes invocation.
     #[serde(default)]
     pub post_hooks: Vec<Hook>,
+    /// Optional hermes profile name passed via `--profile <name>`.
+    pub profile: String,
+    /// When true, passes `--worktree` to hermes.
+    #[serde(default)]
+    pub worktree: bool,
+    /// Optional provider passed to hermes via `--provider <provider>`.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional model passed to hermes via `--model <model>`.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[cfg(test)]
@@ -58,6 +69,7 @@ mod tests {
 name = "triage"
 prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
 output_file = "step_00_triage.md"
+profile = "test"
 
 [[steps.post_hooks]]
 type = "file_not_empty"
@@ -80,6 +92,7 @@ path = "{{output_path}}"
 name = "lint"
 prompt_template = "Lint the code."
 output_file = "step_00_lint.md"
+profile = "test"
 
 [[steps.post_hooks]]
 type = "script"

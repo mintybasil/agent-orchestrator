@@ -36,8 +36,8 @@ src/
   runner.rs     -- Per-issue sequential step executor
   template.rs   -- {{key}} placeholder renderer + unit tests
   workflow.rs   -- Step and Hook types; loaded by config.rs
-config.toml     -- All config including [[steps]] workflow definition (do not commit real tokens or org names)
-data/           -- Runtime data dir (gitignored); created on first run
+config.example.toml  -- Annotated example config (copy to config.toml and edit)
+data/                -- Runtime data dir (gitignored); created on first run
 ```
 
 ## Architecture notes
@@ -60,11 +60,26 @@ on both streams simultaneously.
 **GitHub pagination**: `list_assigned_issues()` loops with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
 
+## Hermes invocation
+
+Each step calls `hermes chat` with the following flags:
+
+| Flag | Source | Required |
+|---|---|---|
+| `-p <prompt>` | Rendered `prompt_template` | always |
+| `--yolo` | hardcoded | always |
+| `--profile <name>` | `profile` field on step | always |
+| `--worktree` | `worktree = true` on step | optional |
+| `--provider <name>` | `provider` field on step | optional |
+| `--model <name>` | `model` field on step | optional |
+
 ## Extending the workflow
 
-Workflow steps live directly in `config.toml` as `[[steps]]` tables — no separate file, no recompile needed. Edit `config.toml` and restart the daemon.
+Workflow steps live in your config file as `[[steps]]` tables — no recompile
+needed. Edit the config and restart the daemon.
 
-To run a different workflow, run a separate daemon instance pointing at a different config file:
+To run a different workflow, run a separate daemon instance pointing at a
+different config file:
 `agent-orchestrator --config other-config.toml`
 
 ### Step format
@@ -74,6 +89,10 @@ To run a different workflow, run a separate daemon instance pointing at a differ
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}."
 output_file = "step_NN_my-step.md"
+profile = "cto"         # required: passed to hermes as --profile
+# worktree = true       # optional: passes --worktree to hermes
+# provider = "openai"   # optional: passes --provider to hermes
+# model = "o3"          # optional: passes --model to hermes
 
 # Optional pre-hooks (run before hermes)
 [[steps.pre_hooks]]
