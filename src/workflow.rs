@@ -24,7 +24,6 @@ pub enum Hook {
 pub struct Step {
     pub name: String,
     pub prompt_template: String,
-    pub output_file: String,
     /// Hooks that run *before* the hermes invocation.
     #[serde(default)]
     pub pre_hooks: Vec<Hook>,
@@ -68,7 +67,6 @@ mod tests {
 [[steps]]
 name = "triage"
 prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
-output_file = "step_00_triage.md"
 profile = "test"
 
 [[steps.post_hooks]]
@@ -91,7 +89,6 @@ path = "{{output_path}}"
 [[steps]]
 name = "lint"
 prompt_template = "Lint the code."
-output_file = "step_00_lint.md"
 profile = "test"
 
 [[steps.post_hooks]]

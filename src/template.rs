@@ -36,8 +36,8 @@ mod tests {
     #[test]
     fn output_path_substitution() {
         let mut vars = HashMap::new();
-        vars.insert("output_path", "/data/repo/42/step_00_triage.md".to_string());
-        let result = render("Write triage to {{output_path}}.", &vars);
-        assert_eq!(result, "Write triage to /data/repo/42/step_00_triage.md.");
+        vars.insert("output_path", "data/owner/repo/42".to_string());
+        let result = render("Write triage to {{output_path}}/triage.md.", &vars);
+        assert_eq!(result, "Write triage to data/owner/repo/42/triage.md.");
     }
 }

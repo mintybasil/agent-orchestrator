@@ -101,26 +101,18 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
     fs::create_dir_all(&issue_dir)?;
 
     for (idx, step) in steps.iter().enumerate() {
-        let output_path = issue_dir.join(&step.output_file);
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
 
-        // Build template variables: standard vars + paths to all prior step outputs.
-        let mut var_pairs: Vec<(String, String)> = vec![
+        // Build template variables.
+        let var_pairs: Vec<(String, String)> = vec![
             ("owner".to_string(), key.owner.clone()),
             ("repo".to_string(), key.repo.clone()),
             ("issue_number".to_string(), key.number.to_string()),
             (
                 "output_path".to_string(),
-                output_path.to_string_lossy().into_owned(),
+                issue_dir.to_string_lossy().into_owned(),
             ),
         ];
-        for prior in 0..idx {
-            let prior_path = issue_dir.join(&steps[prior].output_file);
-            var_pairs.push((
-                format!("step_{}_output", prior),
-                prior_path.to_string_lossy().into_owned(),
-            ));
-        }
         let vars: HashMap<&str, String> = var_pairs
             .iter()
             .map(|(k, v)| (k.as_str(), v.clone()))
