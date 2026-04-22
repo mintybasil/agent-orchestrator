@@ -21,14 +21,15 @@ profile = "pm"
 
 [[steps.post_hooks]]
 type = "file_not_empty"
-path = "{{output_path}}"
+path = "{{output_path}}/{{issue_number}}/plan.md"
 
 [[steps]]
 name = "Implement"
-prompt_template = "Use the executing-plans skill to implement {{output_path}}/{{issue_number}}/plan.md."
+prompt_template = "Use the executing-plans skill to implement {{output_path}}/{{issue_number}}/plan.md. Push your changes a new branch and open a PR."
 output_file = "{{output_path}}/{{issue_number}}/implementation.md"
 profile = "swe"
+worktree = true
 
 [[steps.post_hooks]]
 type = "file_not_empty"
-path = "{{output_path}}"
+path = "{{output_path}}/{{issue_number}}/implementation.md"
