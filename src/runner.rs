@@ -135,6 +135,10 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
         let provider = step.provider.clone();
         let model = step.model.clone();
         let error_path_clone = error_path.clone();
+
+        // Run hermes from the repo folder so it treats that as project root.
+        let repo_dir = data_root.join(&key.owner).join(&key.repo);
+
         tokio::task::spawn_blocking(move || {
             invoke(
                 &prompt,
@@ -143,6 +147,7 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
                 provider.as_deref(),
                 model.as_deref(),
                 &error_path_clone,
+                Some(&repo_dir),
             )
         })
         .await
