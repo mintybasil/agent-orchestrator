@@ -47,7 +47,11 @@ mod tests {
         // Simulate how runner.rs builds issue_dir (data_root is always absolute after Task 2)
         let data_root = PathBuf::from("/home/user/.agent-orchestrator");
         let issue_dir = data_root.join("owner").join("repo").join("42");
-        assert!(issue_dir.is_absolute(), "issue_dir must be absolute: {:?}", issue_dir);
+        assert!(
+            issue_dir.is_absolute(),
+            "issue_dir must be absolute: {:?}",
+            issue_dir
+        );
         // Simulate the template substitution
         let mut vars = std::collections::HashMap::new();
         let output_path_str = issue_dir.to_string_lossy().into_owned();
