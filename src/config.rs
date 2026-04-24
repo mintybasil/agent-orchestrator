@@ -1,12 +1,6 @@
 use crate::workflow::Step;
 use anyhow::Context;
 
-fn default_data_dir() -> std::path::PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".agent-orchestrator")
-}
-
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
     pub poll_interval_secs: u64,

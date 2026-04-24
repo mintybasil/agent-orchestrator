@@ -42,11 +42,24 @@ async fn main() {
     };
 
     // data/ directory writable
-    let data_root = std::path::PathBuf::from("data");
-    if let Err(e) = std::fs::create_dir_all(&data_root) {
-        eprintln!("ERROR: cannot create data/ directory: {}", e);
-        std::process::exit(1);
-    }
+    let data_root: std::path::PathBuf = {
+        let raw = cli.data_dir.unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".agent-orchestrator")
+        });
+        if let Err(e) = std::fs::create_dir_all(&raw) {
+            eprintln!("ERROR: cannot create data dir {:?}: {}", raw, e);
+            std::process::exit(1);
+        }
+        match raw.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("ERROR: cannot resolve data dir {:?}: {}", raw, e);
+                std::process::exit(1);
+            }
+        }
+    };
     let probe_path = data_root.join(".probe");
     if let Err(e) = std::fs::write(&probe_path, b"") {
         eprintln!("ERROR: data/ directory is not writable: {}", e);
@@ -65,11 +78,12 @@ async fn main() {
     }
 
     tracing::info!(
-        "agent-orchestrator starting: {} repos, {} workflow steps, poll every {}s, assigned_to={}",
+        "agent-orchestrator starting: {} repos, {} workflow steps, poll every {}s, assigned_to={}, data_dir={}",
         config.repos.len(),
         workflow_steps.len(),
         config.poll_interval_secs,
-        config.assigned_to
+        config.assigned_to,
+        data_root.display()
     );
 
     let completed = poller::load_completed(&data_root);
