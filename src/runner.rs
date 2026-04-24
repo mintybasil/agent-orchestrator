@@ -62,7 +62,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
             let stderr_thread = std::thread::spawn(move || {
                 if let Some(stderr) = stderr_stream {
                     let reader = BufReader::new(stderr);
-                    for line in reader.lines().flatten() {
+                    for line in reader.lines().map_while(Result::ok) {
                         tracing::error!("[hook stderr] {}", line);
                     }
                 }
@@ -70,7 +70,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
 
             if let Some(stdout) = child.stdout.take() {
                 let reader = BufReader::new(stdout);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     tracing::info!("[hook stdout] {}", line);
                 }
             }

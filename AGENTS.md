@@ -37,7 +37,7 @@ src/
   template.rs   -- {{key}} placeholder renderer + unit tests
   workflow.rs   -- Step and Hook types; loaded by config.rs
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
-data/                -- Runtime data dir (gitignored); created on first run
+~/.agent-orchestrator/  -- Runtime data dir (gitignored, default); override with --data-dir
 ```
 
 ## Architecture notes
@@ -112,7 +112,7 @@ path = "{{output_path}}/my-step.md"
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Path to the issue data directory (`data/<owner>/<repo>/<issue_number>/`), created before the first step runs |
+| `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
 
 ### Hook types
 
@@ -135,14 +135,14 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 
 - `GITHUB_TOKEN` env var must be set (validated on startup, hard exit if missing).
 - `hermes` must be on `PATH` (validated on startup, hard exit if missing).
-- `data/` must be writable (validated on startup, hard exit if not).
+- `<data-dir>` must be writable (validated on startup, hard exit if not); override with `--data-dir` (default: `~/.agent-orchestrator`).
 - Config file must be readable TOML (validated on startup, hard exit if not).
 
 ## Debugging a failed issue
 
-Failed issues are written to `data/failed.json` with a timestamp and error
+Failed issues are written to `<data-dir>/failed.json` with a timestamp and error
 message. The stderr capture for the failing hermes invocation is written to
-`data/{owner}/{repo}/{issue_number}/step_NN_<name>.error`.
+`<data-dir>/{owner}/{repo}/{issue_number}/step_NN_<name>.error`.
 
 To retry a failed issue, restart the daemon (the `permanently_failed` set is
 in-memory only).
