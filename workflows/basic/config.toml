@@ -24,7 +24,7 @@ path = "{{output_path}}/plan.md"
 
 [[steps]]
 name = "Implement"
-prompt_template = "Use the executing-plans skill to implement {{output_path}}/plan.md. Push your changes to a new branch and open a PR."
+prompt_template = "We have a plan in {{output_path}}/plan.md to address issue #{{issue_number}} in {{owner}}/{{repo}}. Use the executing-plans skill to implement the plan. Push your changes to a new branch and open a PR."
 profile = "swe"
 worktree = true
 
