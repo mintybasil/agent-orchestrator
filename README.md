@@ -36,7 +36,7 @@ The binary is at `target/release/agent-orchestrator`.
 
 Copy `config.example.toml` to `config.toml` and edit it:
 
-```
+```toml
 poll_interval_secs = 60
 assigned_to = "your-github-username"
 allowed_issue_creators = ["your-github-username"]
