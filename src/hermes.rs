@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 /// Passes `--profile <profile>` and, if `worktree` is true, `--worktree`.
 /// Optionally passes `--provider <provider>` and `--model <model>`.
 /// The prompt is passed via `-p <prompt>`.
+/// If `work_dir` is provided, hermes runs from that directory (which becomes its project root).
 /// Streams stdout/stderr to tracing::info!/tracing::error! line by line.
 /// Returns Ok(()) on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns Err.
@@ -18,8 +19,12 @@ pub fn invoke(
     provider: Option<&str>,
     model: Option<&str>,
     error_file: &Path,
+    work_dir: Option<&Path>,
 ) -> Result<()> {
     let mut cmd = Command::new("hermes");
+    if let Some(dir) = work_dir {
+        cmd.current_dir(dir);
+    }
     cmd.arg("chat")
         .arg("-q")
         .arg(prompt)
