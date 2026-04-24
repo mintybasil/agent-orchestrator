@@ -12,10 +12,10 @@ configured user and runs a multi-step agent workflow against each one using
    tokio tasks.
 3. Each issue runs through the configured workflow steps sequentially by invoking
    `hermes chat` as a subprocess with a rendered prompt.
-4. Step outputs are written to `data/{owner}/{repo}/{issue_number}/` and
+4. Step outputs are written to `<data-dir>/{owner}/{repo}/{issue_number}/` and
    validated (non-empty file check) before the next step starts.
-5. Completed issue keys are persisted to `data/completed.json` so they survive
-   restarts. Failed issues are written to `data/failed.json` with a timestamp
+5. Completed issue keys are persisted to `<data-dir>/completed.json` so they survive
+   restarts. Failed issues are written to `<data-dir>/failed.json` with a timestamp
    and error message, and are not retried within the same daemon run.
 
 ## Requirements
@@ -47,14 +47,12 @@ repo  = "your-repo"
 
 [[steps]]
 name = "triage"
-prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
-output_file = "step_00_triage.md"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
 profile = "cto"
 
 [[steps]]
 name = "implement"
-prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary to {{output_path}}."
-output_file = "step_01_implement.md"
+prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary to {{output_path}}/implement.md."
 profile = "cto"
 ```
 
@@ -64,7 +62,6 @@ profile = "cto"
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `output_file` | string | yes | Filename written under the issue's data directory |
 | `profile` | string | yes | Hermes profile passed via `--profile` |
 | `worktree` | bool | no | When `true`, passes `--worktree` to hermes (default: `false`) |
 | `provider` | string | no | Passed to hermes via `--provider` |
@@ -85,7 +82,7 @@ hermes chat -p <prompt> --yolo --profile <profile> [--worktree] [--provider <pro
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Full path where this step must write its output |
+| `{{output_path}}` | Full path where this step must write its output (under `<data-dir>/{owner}/{repo}/{issue_number}/`) |
 | `{{step_N_output}}` | Full path to step N's output file (0-indexed; for chaining steps) |
 
 ### Hooks
@@ -111,18 +108,19 @@ args = ["{{issue_number}}"]
 ## Running
 
 ```
-export GITHUB_TOKEN=ghp_...
+export GITHUB_TOKEN=***
 ./target/release/agent-orchestrator --config config.toml
 ```
 
-The `--config` flag defaults to `config.toml` in the current directory. The
-daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
+The `--config` flag defaults to `config.toml` in the current directory.
+Use `--data-dir <DIR>` to override the default data directory (`~/.agent-orchestrator`).
+The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
 
 On startup the daemon validates:
 
 - The config file is readable and parses correctly.
 - `GITHUB_TOKEN` is set and non-empty.
-- The `data/` directory exists or can be created, and is writable.
+- The data directory (`--data-dir`, default `~/.agent-orchestrator`) exists or can be created, and is writable.
 - `hermes` is present on `PATH`.
 
 Any validation failure exits with a descriptive error message.
@@ -130,13 +128,11 @@ Any validation failure exits with a descriptive error message.
 ## Data directory layout
 
 ```
-data/
+<data-dir>/
 ├── completed.json              # Array of "owner/repo/N" keys
-├── failed.json                 # Array of {key, timestamp, error} objects
+├── failed.json                # Array of {key, timestamp, error} objects
 └── {owner}/{repo}/{issue_number}/
-    ├── step_00_triage.md       # Step output files
-    ├── step_01_implement.md
-    └── step_NN_<name>.error    # Stderr capture on failure (if any)
+    └── step_NN_<name>.md      # Step output files written by hermes
 ```
 
 ## Environment variables
