@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use tracing;
 
 /// Invoke `hermes chat` with the given prompt, always passing `--yolo`.
 /// Passes `--profile <profile>` and, if `worktree` is true, `--worktree`.
@@ -40,6 +41,7 @@ pub fn invoke(
     if let Some(model) = model {
         cmd.arg("--model").arg(model);
     }
+    tracing::debug!("Executing {:?}", cmd);
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
