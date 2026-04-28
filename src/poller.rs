@@ -115,12 +115,14 @@ pub async fn run_poll_loop(
                 let file_lock_clone = Arc::clone(&file_lock);
                 let data_root_clone = data_root.clone();
                 let key_str_clone = key_str.clone();
+                let token_clone = token.clone();
                 let failed_path = data_root.join("failed.json");
                 let completed_path = data_root.join("completed.json");
                 let steps_clone = Arc::clone(&workflow_steps);
 
                 tokio::spawn(async move {
-                    let result = run_issue(&issue_key, &data_root_clone, &steps_clone).await;
+                    let result =
+                        run_issue(&issue_key, &data_root_clone, &steps_clone, &token_clone).await;
                     in_flight_clone
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())

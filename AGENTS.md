@@ -55,8 +55,10 @@ Each monitored repo gets a workspace directory under the data dir:
 ```
 
 Before each workflow run, the orchestrator ensures the workspace exists:
-- **First run**: `git clone https://github.com/{owner}/{repo}.git` into the workspace directory
-- **Subsequent runs**: `git pull origin main` to update to latest
+- **First run**: `git clone` into the workspace directory using the `GITHUB_TOKEN` for authentication
+- **Subsequent runs**: `git pull origin main` to update to latest (token re-injected into the remote URL temporarily, then stripped after pull)
+
+Both clone and pull set `GIT_TERMINAL_PROMPT=0` to prevent interactive auth prompts.
 
 Hermes is launched from inside the `workspace/` directory with `--worktree`,
 so it operates on an up-to-date checkout of `main`.
