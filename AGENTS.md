@@ -28,9 +28,10 @@ cargo check
 
 ```
 src/
-  main.rs       -- Entry point: startup validation, tracing init, poll loop
+  main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
+  askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
   config.rs     -- Config struct (TOML) + clap CLI (--config flag)
-  git.rs        -- Git workspace management: clone/pull for repo checkouts
+  git.rs        -- Git workspace management: clone/pull with ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
   hermes.rs     -- Subprocess invoker for the hermes CLI agent
   poller.rs     -- tokio poll loop, concurrency dedup, JSON persistence
@@ -55,8 +56,30 @@ Each monitored repo gets a workspace directory under the data dir:
 ```
 
 Before each workflow run, the orchestrator ensures the workspace exists:
-- **First run**: `git clone https://github.com/{owner}/{repo}.git` into the workspace directory
-- **Subsequent runs**: `git pull origin main` to update to latest
+- **First run**: `git clone` into the workspace directory using `GIT_ASKPASS` for authentication
+- **Subsequent runs**: `git pull origin main` to update to latest (also via `GIT_ASKPASS`)
+
+### Git authentication (GIT_ASKPASS)
+
+The binary acts as its own credential helper. When it spawns `git clone` or `git pull`,
+it sets three environment variables on the child process:
+
+| Env var | Value | Purpose |
+|---|---|---|
+| `GIT_ASKPASS` | Path to the running binary (`current_exe`) | Tells git to re-invoke the binary for credential prompts |
+| `AO_ASKPASS_MODE` | `1` | Sentinel: puts the re-invocation into askpass mode |
+| `AO_GIT_TOKEN` | The `GITHUB_TOKEN` value | The token to return as the password |
+| `GIT_TERMINAL_PROMPT` | `0` | Prevents interactive auth fallback |
+
+When git needs credentials, it re-invokes the binary. `main()` checks for
+`AO_ASKPASS_MODE` first — if set, it runs the askpass handler (which prints
+either `x-access-token` for username prompts or the token for password prompts)
+and exits immediately, bypassing all normal startup.
+
+**Why this approach**: The token is never embedded in URLs, never written to
+`.git/config`, never appears in process arguments, and never leaks outside the
+process's env block. The ASKPASS round-trip is scoped to the git child process
+only.
 
 Hermes is launched from inside the `workspace/` directory with `--worktree`,
 so it operates on an up-to-date checkout of `main`.

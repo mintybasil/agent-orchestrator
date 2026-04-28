@@ -3,7 +3,7 @@ use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, interval};
 
@@ -22,9 +22,10 @@ struct FailedEntry {
 pub async fn run_poll_loop(
     config: Config,
     token: String,
-    data_root: PathBuf,
+    data_root: &Path,
     completed: Arc<Mutex<HashSet<String>>>,
     workflow_steps: Vec<workflow::Step>,
+    current_exe: &Path,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -113,14 +114,23 @@ pub async fn run_poll_loop(
                 let in_flight_clone = Arc::clone(&in_flight);
                 let permanently_failed_clone = Arc::clone(&permanently_failed);
                 let file_lock_clone = Arc::clone(&file_lock);
-                let data_root_clone = data_root.clone();
+                let data_root_clone = data_root.to_path_buf();
                 let key_str_clone = key_str.clone();
+                let token_clone = token.clone();
+                let current_exe_clone = current_exe.to_path_buf();
                 let failed_path = data_root.join("failed.json");
                 let completed_path = data_root.join("completed.json");
                 let steps_clone = Arc::clone(&workflow_steps);
 
                 tokio::spawn(async move {
-                    let result = run_issue(&issue_key, &data_root_clone, &steps_clone).await;
+                    let result = run_issue(
+                        &issue_key,
+                        &data_root_clone,
+                        &steps_clone,
+                        &token_clone,
+                        &current_exe_clone,
+                    )
+                    .await;
                     in_flight_clone
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
