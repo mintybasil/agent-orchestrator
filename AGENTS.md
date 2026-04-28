@@ -30,6 +30,7 @@ cargo check
 src/
   main.rs       -- Entry point: startup validation, tracing init, poll loop
   config.rs     -- Config struct (TOML) + clap CLI (--config flag)
+  git.rs        -- Git workspace management: clone/pull for repo checkouts
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
   hermes.rs     -- Subprocess invoker for the hermes CLI agent
   poller.rs     -- tokio poll loop, concurrency dedup, JSON persistence
@@ -37,8 +38,28 @@ src/
   template.rs   -- {{key}} placeholder renderer + unit tests
   workflow.rs   -- Step and Hook types; loaded by config.rs
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
-~/.agent-orchestrator/  -- Runtime data dir (gitignored, default); override with --data-dir
+data/                -- Runtime data dir (gitignored); created on first run
 ```
+
+## Data directory layout
+
+Each monitored repo gets a workspace directory under the data dir:
+
+```
+{data-dir}/
+  {owner}/{repo}/
+    workspace/           -- git clone of the repo (auto-managed)
+    {issue_number}/      -- per-issue output directory
+  completed.json         -- set of completed issue keys
+  failed.json            -- list of failed issue entries
+```
+
+Before each workflow run, the orchestrator ensures the workspace exists:
+- **First run**: `git clone https://github.com/{owner}/{repo}.git` into the workspace directory
+- **Subsequent runs**: `git pull origin main` to update to latest
+
+Hermes is launched from inside the `workspace/` directory with `--worktree`,
+so it operates on an up-to-date checkout of `main`.
 
 ## Architecture notes
 
@@ -72,6 +93,11 @@ Each step calls `hermes chat` with the following flags:
 | `--worktree` | `worktree = true` on step | optional |
 | `--provider <name>` | `provider` field on step | optional |
 | `--model <name>` | `model` field on step | optional |
+
+Before the first step runs, the orchestrator clones the target repo into
+`<data-dir>/<owner>/<repo>/workspace/` (or pulls latest `main` if it already
+exists). Hermes is invoked from inside that `workspace/` directory so it
+treats the repo as its project root.
 
 ## Extending the workflow
 
@@ -113,6 +139,7 @@ path = "{{output_path}}/my-step.md"
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
 | `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
+| `{{workspace}}` | Path to the git clone of the repo (`<data-dir>/<owner>/<repo>/workspace/`), auto-managed by the orchestrator |
 
 ### Hook types
 

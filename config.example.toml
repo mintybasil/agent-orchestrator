@@ -9,7 +9,7 @@ owner = "your-org"
 repo = "your-repo"
 
 # Workflow steps executed sequentially for each assigned issue.
-# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
+# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{workspace}}
 
 [[steps]]
 name = "triage"

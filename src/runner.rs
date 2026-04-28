@@ -1,3 +1,4 @@
+use crate::git;
 use crate::hermes::invoke;
 use crate::template::render;
 use crate::workflow::{Hook, Step};
@@ -100,6 +101,9 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
         .join(key.number.to_string());
     fs::create_dir_all(&issue_dir)?;
 
+    // Ensure a git clone of the repo exists and is up-to-date.
+    let workspace_dir = git::ensure_workspace(data_root, &key.owner, &key.repo)?;
+
     for (idx, step) in steps.iter().enumerate() {
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
 
@@ -111,6 +115,10 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
             (
                 "output_path".to_string(),
                 issue_dir.to_string_lossy().into_owned(),
+            ),
+            (
+                "workspace".to_string(),
+                workspace_dir.to_string_lossy().into_owned(),
             ),
         ];
         let vars: HashMap<&str, String> = var_pairs
@@ -136,8 +144,8 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
         let model = step.model.clone();
         let error_path_clone = error_path.clone();
 
-        // Run hermes from the repo folder so it treats that as project root.
-        let repo_dir = data_root.join(&key.owner).join(&key.repo);
+        // Run hermes from the workspace directory (git clone of the repo).
+        let workspace_dir_clone = workspace_dir.clone();
 
         tokio::task::spawn_blocking(move || {
             invoke(
@@ -147,7 +155,7 @@ pub async fn run_issue(key: &IssueKey, data_root: &Path, steps: &[Step]) -> Resu
                 provider.as_deref(),
                 model.as_deref(),
                 &error_path_clone,
-                Some(&repo_dir),
+                Some(&workspace_dir_clone),
             )
         })
         .await

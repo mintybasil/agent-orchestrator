@@ -2,6 +2,7 @@ use crate::config::Cli;
 use clap::Parser;
 
 mod config;
+mod git;
 mod github;
 mod hermes;
 mod poller;
