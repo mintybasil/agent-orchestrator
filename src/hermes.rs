@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 /// Optionally passes `--provider <provider>` and `--model <model>`.
 /// The prompt is passed via `-p <prompt>`.
 /// If `work_dir` is provided, hermes runs from that directory (which becomes its project root).
+/// `issue_tag` is a short identifier like `owner/repo#123` — it is included in every
+/// log line so that interleaved output from multiple concurrent issues can be told apart.
 /// Streams stdout/stderr to tracing::info!/tracing::error! line by line.
 /// Returns Ok(()) on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns Err.
@@ -20,6 +22,7 @@ pub fn invoke(
     model: Option<&str>,
     error_file: &Path,
     work_dir: Option<&Path>,
+    issue_tag: &str,
 ) -> Result<()> {
     let mut cmd = Command::new("hermes");
     if let Some(dir) = work_dir {
@@ -44,27 +47,31 @@ pub fn invoke(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to spawn hermes: {}", e))?;
+        .map_err(|e| {
+            anyhow::anyhow!("[{} {}] failed to spawn hermes: {}", profile, issue_tag, e)
+        })?;
 
     let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let log_prefix = format!("[{} {}]", profile, issue_tag);
 
     // Drain stderr on a dedicated thread (concurrent with stdout drain)
     let stderr_stream = child.stderr.take();
     let stderr_capture_clone = Arc::clone(&stderr_capture);
+    let log_prefix_stderr = log_prefix.clone();
     let stderr_thread = std::thread::spawn(move || {
         if let Some(stderr) = stderr_stream {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
                 match line {
                     Ok(l) => {
-                        tracing::error!("[hermes stderr] {}", l);
+                        tracing::error!("{} stderr: {}", log_prefix_stderr, l);
                         let mut cap = stderr_capture_clone
                             .lock()
                             .unwrap_or_else(|e| e.into_inner());
                         cap.push_str(&l);
                         cap.push('\n');
                     }
-                    Err(e) => tracing::warn!("[hermes stderr read error] {}", e),
+                    Err(e) => tracing::warn!("{} stderr read error: {}", log_prefix_stderr, e),
                 }
             }
         }
@@ -75,8 +82,8 @@ pub fn invoke(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             match line {
-                Ok(l) => tracing::info!("[hermes] {}", l),
-                Err(e) => tracing::warn!("[hermes stdout read error] {}", e),
+                Ok(l) => tracing::info!("{} {}", log_prefix, l),
+                Err(e) => tracing::warn!("{} stdout read error: {}", log_prefix, e),
             }
         }
     }
@@ -96,6 +103,11 @@ pub fn invoke(
         if let Err(e) = std::fs::write(error_file, &stderr_text) {
             tracing::warn!("failed to write error file {:?}: {}", error_file, e);
         }
-        anyhow::bail!("hermes exited with code {}", code);
+        anyhow::bail!(
+            "[{} {}] hermes exited with code {}",
+            profile,
+            issue_tag,
+            code
+        );
     }
 }

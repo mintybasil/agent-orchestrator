@@ -155,6 +155,7 @@ pub async fn run_issue(
 
         // Run hermes from the workspace directory (git clone of the repo).
         let workspace_dir_clone = workspace_dir.clone();
+        let issue_tag = key.to_string();
 
         tokio::task::spawn_blocking(move || {
             invoke(
@@ -165,6 +166,7 @@ pub async fn run_issue(
                 model.as_deref(),
                 &error_path_clone,
                 Some(&workspace_dir_clone),
+                &issue_tag,
             )
         })
         .await
