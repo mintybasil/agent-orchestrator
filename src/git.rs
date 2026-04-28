@@ -7,7 +7,11 @@ use std::process::Command;
 /// If the directory does not exist, clones the repository.
 /// If it already exists, pulls the latest changes from `origin main`.
 /// Returns the path to the workspace directory.
-pub fn ensure_workspace(data_root: &Path, owner: &str, repo: &str) -> anyhow::Result<std::path::PathBuf> {
+pub fn ensure_workspace(
+    data_root: &Path,
+    owner: &str,
+    repo: &str,
+) -> anyhow::Result<std::path::PathBuf> {
     let workspace = data_root.join(owner).join(repo).join("workspace");
 
     if workspace.exists() {
