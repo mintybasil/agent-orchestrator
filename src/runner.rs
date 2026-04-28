@@ -95,11 +95,13 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
 /// Returns Ok(()) if all steps succeeded, Err if any step failed.
 /// data_root is the base data/ directory (e.g. PathBuf::from("data")).
 /// token is the GitHub token used for authenticating git operations.
+/// current_exe is the path to this binary, used as GIT_ASKPASS helper.
 pub async fn run_issue(
     key: &IssueKey,
     data_root: &Path,
     steps: &[Step],
     token: &str,
+    current_exe: &Path,
 ) -> Result<()> {
     let issue_dir = data_root
         .join(&key.owner)
@@ -108,7 +110,8 @@ pub async fn run_issue(
     fs::create_dir_all(&issue_dir)?;
 
     // Ensure a git clone of the repo exists and is up-to-date.
-    let workspace_dir = git::ensure_workspace(data_root, &key.owner, &key.repo, token)?;
+    let workspace_dir =
+        git::ensure_workspace(data_root, &key.owner, &key.repo, token, current_exe)?;
 
     for (idx, step) in steps.iter().enumerate() {
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
