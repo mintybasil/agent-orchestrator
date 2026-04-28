@@ -66,4 +66,12 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn workspace_substitution() {
+        let mut vars = HashMap::new();
+        vars.insert("workspace", "/data/owner/repo/workspace".to_string());
+        let result = render("Work in {{workspace}} for this issue.", &vars);
+        assert_eq!(result, "Work in /data/owner/repo/workspace for this issue.");
+    }
 }
