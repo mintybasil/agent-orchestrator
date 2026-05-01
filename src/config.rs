@@ -97,7 +97,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "carol"
-allowed_issue_creators = ["dave"]
+allowed_users = ["dave"]
 
 [[repos]]
 owner = "o"
@@ -115,10 +115,13 @@ harness = { type = "hermes", profile = "cto" }
         match &config.triggers[0] {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_issue_creators,
+                allowed_users,
             } => {
                 assert_eq!(assigned_to, "carol");
-                assert_eq!(allowed_issue_creators, &vec!["dave"]);
+                assert_eq!(allowed_users, &vec!["dave"]);
+            }
+            TriggerConfig::GithubPrReview { .. } => {
+                panic!("expected GithubIssueAssigned, got GithubPrReview");
             }
         }
         // Verify step harness loaded
@@ -164,7 +167,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "test"
-allowed_issue_creators = ["test"]
+allowed_users = ["test"]
 
 [[repos]]
 owner = "o"
@@ -188,5 +191,47 @@ path = "{{output_path}}"
             msg.contains("file_not_empty") || msg.contains("unknown variant"),
             "expected TOML error detail in error message, got: {msg}"
         );
+    }
+
+    #[test]
+    fn both_trigger_types_deserialize() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[triggers]]
+type = "github_pr_review"
+allowed_users = ["eve"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let config = Config::load(f.path()).unwrap();
+        assert_eq!(config.triggers.len(), 2);
+        match &config.triggers[0] {
+            TriggerConfig::GithubIssueAssigned { assigned_to, .. } => {
+                assert_eq!(assigned_to, "carol");
+            }
+            other => panic!("expected GithubIssueAssigned, got {:?}", other),
+        }
+        match &config.triggers[1] {
+            TriggerConfig::GithubPrReview { allowed_users } => {
+                assert_eq!(allowed_users, &vec!["eve"]);
+            }
+            other => panic!("expected GithubPrReview, got {:?}", other),
+        }
     }
 }
