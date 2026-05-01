@@ -49,12 +49,16 @@ pub trait Harness {
     fn name(&self) -> &str;
 
     /// Execute a single workflow step.
+    ///
+    /// `issue` is a human-readable identifier like "owner/repo#123"
+    /// for log context.
     fn run_step(
         &self,
         step: &Step,
         workspace_dir: &Path,
         rendered_prompt: &str,
         error_path: &Path,
+        issue: &str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>>;
 }
 

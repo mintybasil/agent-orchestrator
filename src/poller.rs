@@ -185,7 +185,7 @@ fn append_failed(path: &Path, key: &str, error: &str, file_lock: &std::sync::Mut
     };
     entries.push(FailedEntry {
         key: key.to_string(),
-        timestamp: Utc::now().to_rfc3339(),
+        timestamp: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         error: error.to_string(),
     });
     if let Err(e) = write_json(path, &entries) {
