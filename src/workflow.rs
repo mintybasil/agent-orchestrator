@@ -104,7 +104,12 @@ harness = { type = "hermes", profile = "cto" }
 "#;
         let config = parse_config(steps).unwrap();
         match &config.steps[0].harness {
-            HarnessConfig::Hermes { profile, worktree, provider, model } => {
+            HarnessConfig::Hermes {
+                profile,
+                worktree,
+                provider,
+                model,
+            } => {
                 assert_eq!(profile, "cto");
                 assert!(!worktree);
                 assert!(provider.is_none());

@@ -48,7 +48,9 @@ pub trait Trigger {
         &self,
         repos: &[RepoConfig],
         token: &str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>>;
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
+    >;
 }
 
 /// Build a runtime Trigger from its config.
@@ -84,8 +86,9 @@ impl Trigger for GithubIssueAssignedTrigger {
         &self,
         repos: &[RepoConfig],
         token: &str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>>
-    {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
+    > {
         let assigned_to = self.assigned_to.clone();
         let allowed_creators = self.allowed_issue_creators.clone();
         let client = self.client.clone();

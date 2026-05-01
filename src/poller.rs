@@ -33,11 +33,8 @@ pub async fn run_poll_loop(
     let workflow_steps = Arc::new(workflow_steps);
 
     // Build triggers from config
-    let triggers: Vec<Box<dyn Trigger + Send>> = config
-        .triggers
-        .iter()
-        .map(|tc| tc.build())
-        .collect();
+    let triggers: Vec<Box<dyn Trigger + Send>> =
+        config.triggers.iter().map(|tc| tc.build()).collect();
 
     let repos = config.repos.clone();
 
@@ -45,7 +42,11 @@ pub async fn run_poll_loop(
         ticker.tick().await;
 
         for trigger in &triggers {
-            tracing::info!("poll tick: trigger={}, checking {} repos", trigger.name(), repos.len());
+            tracing::info!(
+                "poll tick: trigger={}, checking {} repos",
+                trigger.name(),
+                repos.len()
+            );
 
             let events = match trigger.poll(&repos, &token).await {
                 Ok(events) => events,
