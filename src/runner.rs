@@ -1,5 +1,5 @@
 use crate::git;
-use crate::hermes::invoke;
+use crate::hermes::{InvokeArgs, invoke};
 use crate::template::render;
 use crate::workflow::{Hook, Step};
 use anyhow::Result;
@@ -146,31 +146,20 @@ pub async fn run_issue(
         tracing::info!("[{}] {}: started", key, step.name);
 
         // hermes::invoke is sync; run it in a blocking thread pool.
-        let prompt = render(&step.prompt_template, &vars);
-        let profile = step.profile.clone();
-        let worktree = step.worktree;
-        let provider = step.provider.clone();
-        let model = step.model.clone();
-        let error_path_clone = error_path.clone();
-
-        // Run hermes from the workspace directory (git clone of the repo).
-        let workspace_dir_clone = workspace_dir.clone();
+        let hermes_args = InvokeArgs {
+            prompt: render(&step.prompt_template, &vars),
+            profile: step.profile.clone(),
+            worktree: step.worktree,
+            provider: step.provider.clone(),
+            model: step.model.clone(),
+            error_file: error_path.clone(),
+            work_dir: Some(workspace_dir.clone()),
+        };
         let issue_tag = key.to_string();
 
-        tokio::task::spawn_blocking(move || {
-            invoke(
-                &prompt,
-                &profile,
-                worktree,
-                provider.as_deref(),
-                model.as_deref(),
-                &error_path_clone,
-                Some(&workspace_dir_clone),
-                &issue_tag,
-            )
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
+        tokio::task::spawn_blocking(move || invoke(&hermes_args, &issue_tag))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {
