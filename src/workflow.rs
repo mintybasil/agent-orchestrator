@@ -1,46 +1,25 @@
 use serde::Deserialize;
 
-/// A hook that runs before or after a step.
-///
-/// Deserialized from TOML using the `type` key as a discriminant:
-/// `{ type = "file_non_empty", path = "..." }` or
-/// `{ type = "script", command = "...", args = ["..."] }`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Hook {
-    /// Assert that the file at `path` exists and contains at least one byte.
-    /// `path` may contain template placeholders (e.g. `"{{output_path}}"`).
-    FileNonEmpty { path: String },
-
-    /// Spawn an external process.
-    ///
-    /// `command` is the executable name or absolute path.
-    /// `args` are the arguments; each element may contain template placeholders.
-    Script { command: String, args: Vec<String> },
-}
+use crate::harness::HarnessConfig;
 
 /// A single step in the agent workflow.
+///
+/// Steps are harness-agnostic: they only define *what* to do (name,
+/// prompt, hooks) and *which* harness to use. Harness-specific options
+/// (e.g. hermes profile, worktree, provider, model) live inside the
+/// `harness` field.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
     pub name: String,
     pub prompt_template: String,
-    /// Hooks that run *before* the hermes invocation.
+    /// Hooks that run *before* the agent invocation.
     #[serde(default)]
-    pub pre_hooks: Vec<Hook>,
-    /// Hooks that run *after* a successful hermes invocation.
+    pub pre_hooks: Vec<crate::hooks::Hook>,
+    /// Hooks that run *after* a successful agent invocation.
     #[serde(default)]
-    pub post_hooks: Vec<Hook>,
-    /// Optional hermes profile name passed via `--profile <name>`.
-    pub profile: String,
-    /// When true, passes `--worktree` to hermes.
-    #[serde(default)]
-    pub worktree: bool,
-    /// Optional provider passed to hermes via `--provider <provider>`.
-    #[serde(default)]
-    pub provider: Option<String>,
-    /// Optional model passed to hermes via `--model <model>`.
-    #[serde(default)]
-    pub model: Option<String>,
+    pub post_hooks: Vec<crate::hooks::Hook>,
+    /// Agent harness to use for this step, including harness-specific options.
+    pub harness: HarnessConfig,
 }
 
 #[cfg(test)]
@@ -51,7 +30,15 @@ mod tests {
     /// Helper: parse a Config from a TOML string with boilerplate headers.
     fn parse_config(steps_toml: &str) -> anyhow::Result<Config> {
         let full = format!(
-            "poll_interval_secs = 60\nassigned_to = \"test\"\nallowed_issue_creators = [\"test\"]\n\n[[repos]]\nowner = \"o\"\nrepo = \"r\"\n\n{}",
+            "poll_interval_secs = 60\n\
+             [[triggers]]\n\
+             type = \"github_issue_assigned\"\n\
+             assigned_to = \"test\"\n\
+             allowed_issue_creators = [\"test\"]\n\n\
+             [[repos]]\n\
+             owner = \"o\"\n\
+             repo = \"r\"\n\n\
+             {}",
             steps_toml
         );
         // Write to a temp file and load via Config::load
@@ -67,7 +54,7 @@ mod tests {
 [[steps]]
 name = "triage"
 prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
-profile = "test"
+harness = { type = "hermes", profile = "test" }
 
 [[steps.post_hooks]]
 type = "file_non_empty"
@@ -79,7 +66,7 @@ path = "{{output_path}}"
         assert_eq!(config.steps[0].post_hooks.len(), 1);
         assert!(matches!(
             config.steps[0].post_hooks[0],
-            Hook::FileNonEmpty { .. }
+            crate::hooks::Hook::FileNonEmpty { .. }
         ));
     }
 
@@ -89,7 +76,7 @@ path = "{{output_path}}"
 [[steps]]
 name = "lint"
 prompt_template = "Lint the code."
-profile = "test"
+harness = { type = "hermes", profile = "test" }
 
 [[steps.post_hooks]]
 type = "script"
@@ -99,7 +86,7 @@ args = ["clippy"]
         let config = parse_config(steps).unwrap();
         assert_eq!(config.steps.len(), 1);
         match &config.steps[0].post_hooks[0] {
-            Hook::Script { command, args } => {
+            crate::hooks::Hook::Script { command, args } => {
                 assert_eq!(command, "cargo");
                 assert_eq!(args, &["clippy"]);
             }
@@ -108,10 +95,51 @@ args = ["clippy"]
     }
 
     #[test]
+    fn step_hermes_harness_with_profile() {
+        let steps = r#"
+[[steps]]
+name = "triage"
+prompt_template = "Do triage."
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let config = parse_config(steps).unwrap();
+        match &config.steps[0].harness {
+            HarnessConfig::Hermes {
+                profile,
+                worktree,
+                provider,
+                model,
+            } => {
+                assert_eq!(profile, "cto");
+                assert!(!worktree);
+                assert!(provider.is_none());
+                assert!(model.is_none());
+            }
+        }
+    }
+
+    #[test]
     fn empty_steps_errors() {
         // Config::load rejects configs with no [[steps]]
-        let err = parse_config("").unwrap_err();
-        assert!(err.to_string().contains("no [[steps]]"));
+        // We need valid triggers but empty steps
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "test"
+allowed_issue_creators = ["test"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("steps"), "expected 'steps' in error: {msg}");
     }
 
     #[test]

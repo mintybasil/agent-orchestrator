@@ -1,14 +1,21 @@
+use crate::trigger::TriggerConfig;
 use crate::workflow::Step;
 use anyhow::Context;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
     pub poll_interval_secs: u64,
-    pub assigned_to: String,
+
+    /// Trigger configuration — what initiates workflow runs.
+    /// Empty vec is allowed at deserialization but rejected by Config::load.
+    #[serde(default)]
+    pub triggers: Vec<TriggerConfig>,
+
     pub repos: Vec<RepoConfig>,
+
+    /// Steps to execute. Empty vec is allowed at deserialization but rejected by Config::load.
     #[serde(default)]
     pub steps: Vec<Step>,
-    pub allowed_issue_creators: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -23,14 +30,15 @@ impl Config {
             .with_context(|| format!("reading config from {:?}", path))?;
         let config: Self =
             toml::from_str(&text).with_context(|| format!("parsing config from {:?}", path))?;
+
         anyhow::ensure!(
-            !config.steps.is_empty(),
-            "config {:?} contains no [[steps]]",
+            !config.triggers.is_empty(),
+            "config {:?} must define at least one [[triggers]] entry",
             path
         );
         anyhow::ensure!(
-            !config.allowed_issue_creators.is_empty(),
-            "config {:?} must list at least one allowed_issue_creators entry",
+            !config.steps.is_empty(),
+            "config {:?} contains no [[steps]]",
             path
         );
         Ok(config)
@@ -76,5 +84,71 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(cli.data_dir.unwrap().to_string_lossy(), "/tmp/my-data");
+    }
+
+    #[test]
+    fn explicit_trigger_deserializes() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_issue_creators = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let config = Config::load(f.path()).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        match &config.triggers[0] {
+            TriggerConfig::GithubIssueAssigned {
+                assigned_to,
+                allowed_issue_creators,
+            } => {
+                assert_eq!(assigned_to, "carol");
+                assert_eq!(allowed_issue_creators, &vec!["dave"]);
+            }
+        }
+        // Verify step harness loaded
+        match &config.steps[0].harness {
+            crate::harness::HarnessConfig::Hermes { profile, .. } => {
+                assert_eq!(profile, "cto");
+            }
+        }
+    }
+
+    #[test]
+    fn no_triggers_errors() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("trigger"),
+            "expected 'trigger' in error: {msg}"
+        );
     }
 }

@@ -5,10 +5,13 @@ mod askpass;
 mod config;
 mod git;
 mod github;
+mod harness;
 mod hermes;
+mod hooks;
 mod poller;
 mod runner;
 mod template;
+mod trigger;
 mod workflow;
 
 #[tokio::main]
@@ -33,6 +36,7 @@ async fn main() {
     };
 
     let workflow_steps = config.steps.clone();
+    let trigger_count = config.triggers.len();
 
     // Use the compact formatter so span fields (profile, issue, step_name)
     // appear on every event line, making it easy to tell which issue
@@ -89,7 +93,9 @@ async fn main() {
     }
     let _ = std::fs::remove_file(&probe_path);
 
-    // hermes on PATH
+    // Validate that default harness (hermes) is available on PATH.
+    // Only check hermes since it's the built-in default harness;
+    // future harnesses will validate themselves.
     let hermes_check = std::process::Command::new("which").arg("hermes").output();
     match hermes_check {
         Ok(out) if out.status.success() => {}
@@ -100,11 +106,11 @@ async fn main() {
     }
 
     tracing::info!(
-        "agent-orchestrator starting: {} repos, {} workflow steps, poll every {}s, assigned_to={}, data_dir={}",
+        "agent-orchestrator starting: {} repos, {} triggers, {} workflow steps, poll every {}s, data_dir={}",
         config.repos.len(),
+        trigger_count,
         workflow_steps.len(),
         config.poll_interval_secs,
-        config.assigned_to,
         data_root.display()
     );
 
