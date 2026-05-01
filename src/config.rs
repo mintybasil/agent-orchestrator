@@ -1,14 +1,25 @@
+use crate::trigger::TriggerConfig;
 use crate::workflow::Step;
 use anyhow::Context;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
     pub poll_interval_secs: u64,
-    pub assigned_to: String,
+
+    /// New-style trigger configuration.
+    #[serde(default)]
+    pub triggers: Vec<TriggerConfig>,
+
+    /// Backward-compat: if triggers is empty, these legacy fields are used to
+    /// build a GithubIssueAssigned trigger automatically.
+    pub assigned_to: Option<String>,
+    #[serde(default)]
+    pub allowed_issue_creators: Option<Vec<String>>,
+
     pub repos: Vec<RepoConfig>,
+
     #[serde(default)]
     pub steps: Vec<Step>,
-    pub allowed_issue_creators: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -21,16 +32,32 @@ impl Config {
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config from {:?}", path))?;
-        let config: Self =
+        let mut config: Self =
             toml::from_str(&text).with_context(|| format!("parsing config from {:?}", path))?;
+
+        // Backward compatibility: if no explicit [[triggers]] but legacy fields
+        // are present, synthesize a GithubIssueAssigned trigger.
+        if config.triggers.is_empty()
+            && let Some(ref assigned_to) = config.assigned_to
+        {
+                let creators = config
+                    .allowed_issue_creators
+                    .clone()
+                    .unwrap_or_else(|| vec![assigned_to.clone()]);
+                config.triggers.push(TriggerConfig::GithubIssueAssigned {
+                    assigned_to: assigned_to.clone(),
+                    allowed_issue_creators: creators,
+                });
+            }
+
         anyhow::ensure!(
-            !config.steps.is_empty(),
-            "config {:?} contains no [[steps]]",
+            !config.triggers.is_empty(),
+            "config {:?} must define at least one [[triggers]] entry or set assigned_to",
             path
         );
         anyhow::ensure!(
-            !config.allowed_issue_creators.is_empty(),
-            "config {:?} must list at least one allowed_issue_creators entry",
+            !config.steps.is_empty(),
+            "config {:?} contains no [[steps]]",
             path
         );
         Ok(config)
@@ -76,5 +103,93 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(cli.data_dir.unwrap().to_string_lossy(), "/tmp/my-data");
+    }
+
+    #[test]
+    fn backward_compat_assigned_to_builds_trigger() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+assigned_to = "alice"
+allowed_issue_creators = ["bob"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+profile = "cto"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let config = Config::load(f.path()).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        match &config.triggers[0] {
+            TriggerConfig::GithubIssueAssigned {
+                assigned_to,
+                allowed_issue_creators,
+            } => {
+                assert_eq!(assigned_to, "alice");
+                assert_eq!(allowed_issue_creators, &vec!["bob"]);
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_triggers_override_legacy_fields() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_issue_creators = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+profile = "cto"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let config = Config::load(f.path()).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        match &config.triggers[0] {
+            TriggerConfig::GithubIssueAssigned {
+                assigned_to,
+                allowed_issue_creators,
+            } => {
+                assert_eq!(assigned_to, "carol");
+                assert_eq!(allowed_issue_creators, &vec!["dave"]);
+            }
+        }
+    }
+
+    #[test]
+    fn no_triggers_no_assigned_to_errors() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+profile = "cto"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        assert!(err.to_string().contains("triggers"));
     }
 }

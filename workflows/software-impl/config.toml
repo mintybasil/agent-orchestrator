@@ -1,11 +1,15 @@
 poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
 assigned_to = "your-github-username"
+allowed_issue_creators = ["your-github-username"]
 
 [[repos]]
 owner = "your-org"
 repo = "your-repo"
 
-# Workflow steps executed sequentially for each assigned issue.
+# Workflow steps executed sequentially for each triggered issue.
 # Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}
 # {{output_path}} resolves to data/<owner>/<repo>/<issue_number>/ — created
 # before the first step runs. Steps write their own files into that directory.

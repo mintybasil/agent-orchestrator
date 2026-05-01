@@ -1,33 +1,20 @@
 use serde::Deserialize;
 
-/// A hook that runs before or after a step.
-///
-/// Deserialized from TOML using the `type` key as a discriminant:
-/// `{ type = "file_non_empty", path = "..." }` or
-/// `{ type = "script", command = "...", args = ["..."] }`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Hook {
-    /// Assert that the file at `path` exists and contains at least one byte.
-    /// `path` may contain template placeholders (e.g. `"{{output_path}}"`).
-    FileNonEmpty { path: String },
+// Re-export Hook from the hooks module so external code using
+// crate::workflow::Hook still compiles during migration.
+pub use crate::hooks::Hook;
 
-    /// Spawn an external process.
-    ///
-    /// `command` is the executable name or absolute path.
-    /// `args` are the arguments; each element may contain template placeholders.
-    Script { command: String, args: Vec<String> },
-}
+use crate::harness::HarnessConfig;
 
 /// A single step in the agent workflow.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
     pub name: String,
     pub prompt_template: String,
-    /// Hooks that run *before* the hermes invocation.
+    /// Hooks that run *before* the agent invocation.
     #[serde(default)]
     pub pre_hooks: Vec<Hook>,
-    /// Hooks that run *after* a successful hermes invocation.
+    /// Hooks that run *after* a successful agent invocation.
     #[serde(default)]
     pub post_hooks: Vec<Hook>,
     /// Optional hermes profile name passed via `--profile <name>`.
@@ -41,6 +28,9 @@ pub struct Step {
     /// Optional model passed to hermes via `--model <model>`.
     #[serde(default)]
     pub model: Option<String>,
+    /// Agent harness to use for this step. Defaults to Hermes.
+    #[serde(default)]
+    pub harness: HarnessConfig,
 }
 
 #[cfg(test)]
@@ -51,7 +41,15 @@ mod tests {
     /// Helper: parse a Config from a TOML string with boilerplate headers.
     fn parse_config(steps_toml: &str) -> anyhow::Result<Config> {
         let full = format!(
-            "poll_interval_secs = 60\nassigned_to = \"test\"\nallowed_issue_creators = [\"test\"]\n\n[[repos]]\nowner = \"o\"\nrepo = \"r\"\n\n{}",
+            "poll_interval_secs = 60\n\
+             [[triggers]]\n\
+             type = \"github_issue_assigned\"\n\
+             assigned_to = \"test\"\n\
+             allowed_issue_creators = [\"test\"]\n\n\
+             [[repos]]\n\
+             owner = \"o\"\n\
+             repo = \"r\"\n\n\
+             {}",
             steps_toml
         );
         // Write to a temp file and load via Config::load
@@ -105,6 +103,21 @@ args = ["clippy"]
             }
             other => panic!("unexpected hook: {:?}", other),
         }
+    }
+
+    #[test]
+    fn step_default_harness_is_hermes() {
+        let steps = r#"
+[[steps]]
+name = "triage"
+prompt_template = "Do triage."
+profile = "test"
+"#;
+        let config = parse_config(steps).unwrap();
+        assert!(matches!(
+            config.steps[0].harness,
+            crate::harness::HarnessConfig::Hermes
+        ));
     }
 
     #[test]

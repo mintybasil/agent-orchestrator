@@ -12,7 +12,7 @@ cargo build --release
 # Lint
 cargo clippy
 
-# Run tests (unit tests in src/template.rs and src/workflow.rs)
+# Run tests (unit tests in src/template.rs, src/hooks.rs, src/workflow.rs, etc.)
 cargo test
 
 # Type-check only (faster than a full build)
@@ -33,14 +33,55 @@ src/
   config.rs     -- Config struct (TOML) + clap CLI (--config flag)
   git.rs        -- Git workspace management: clone/pull with ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
-  hermes.rs     -- Subprocess invoker for the hermes CLI agent
-  poller.rs     -- tokio poll loop, concurrency dedup, JSON persistence
-  runner.rs     -- Per-issue sequential step executor
+  harness.rs    -- Pluggable agent harness trait + HarnessConfig enum
+  hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
+  hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
+  poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, JSON persistence
+  runner.rs     -- Per-issue sequential step executor (uses Harness + hooks)
   template.rs   -- {{key}} placeholder renderer + unit tests
-  workflow.rs   -- Step and Hook types; loaded by config.rs
+  trigger.rs    -- Generalized trigger trait + TriggerConfig enum
+  workflow.rs   -- Step type; re-exports Hook from hooks.rs
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
 data/                -- Runtime data dir (gitignored); created on first run
 ```
+
+## Architecture (v0.2)
+
+### Triggers
+
+Triggers define **what initiates a workflow run**. They implement the `Trigger`
+trait and are specified in config via `[[triggers]]` tables.
+
+Currently supported:
+- `github_issue_assigned` — polls GitHub for issues assigned to a user
+
+Adding a new trigger type:
+1. Add a variant to `TriggerConfig` in `src/trigger.rs`
+2. Add a struct implementing `Trigger`
+3. Add a match arm in `TriggerConfig::build()`
+
+### Hooks
+
+Hooks are pre/post step checks. They live in `src/hooks.rs` and are
+re-exported from `workflow.rs` for backward compat.
+
+Adding a new hook type:
+1. Add a variant to the `Hook` enum in `src/hooks.rs`
+2. Add a match arm in `run_hook()`
+
+### Agent Harnesses
+
+Harnesses define **which agent backend runs a step**. They implement the
+`Harness` trait and are specified per-step via the `harness` field.
+
+Currently supported:
+- `hermes` — invokes the hermes CLI agent
+
+Adding a new harness:
+1. Add a variant to `HarnessConfig` in `src/harness.rs`
+2. Add a struct implementing `Harness`
+3. Add a match arm in `HarnessConfig::build()`
+4. (Optional) Add a startup validation in `main.rs`
 
 ## Data directory layout
 
@@ -81,10 +122,7 @@ and exits immediately, bypassing all normal startup.
 process's env block. The ASKPASS round-trip is scoped to the git child process
 only.
 
-Hermes is launched from inside the `workspace/` directory with `--worktree`,
-so it operates on an up-to-date checkout of `main`.
-
-## Architecture notes
+## Additional architecture notes
 
 **Concurrency model**: Each eligible issue is dispatched as a tokio task.
 `in_flight: HashSet<String>` prevents double-dispatch within a tick.
@@ -104,9 +142,9 @@ on both streams simultaneously.
 **GitHub pagination**: `list_assigned_issues()` loops with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
 
-## Hermes invocation
+## Hermes invocation (HermesHarness)
 
-Each step calls `hermes chat` with the following flags:
+When `harness = { type = "hermes" }` (the default), each step calls `hermes chat`:
 
 | Flag | Source | Required |
 |---|---|---|
@@ -119,8 +157,8 @@ Each step calls `hermes chat` with the following flags:
 
 Before the first step runs, the orchestrator clones the target repo into
 `<data-dir>/<owner>/<repo>/workspace/` (or pulls latest `main` if it already
-exists). Hermes is invoked from inside that `workspace/` directory so it
-treats the repo as its project root.
+exists). The hermes harness is invoked from inside that `workspace/` directory
+so it treats the repo as its project root.
 
 ## Extending the workflow
 
@@ -131,6 +169,18 @@ To run a different workflow, run a separate daemon instance pointing at a
 different config file:
 `agent-orchestrator --config other-config.toml`
 
+### Trigger format
+
+```toml
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "your-github-username"
+allowed_issue_creators = ["your-github-username"]
+```
+
+Backward compatible: if no `[[triggers]]` is defined, the legacy `assigned_to`
+and `allowed_issue_creators` top-level fields are used to synthesize a trigger.
+
 ### Step format
 
 ```toml
@@ -138,17 +188,18 @@ different config file:
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 profile = "cto"         # required: passed to hermes as --profile
+harness = { type = "hermes" }  # optional, defaults to hermes
 # worktree = true       # optional: passes --worktree to hermes
 # provider = "openai"   # optional: passes --provider to hermes
 # model = "o3"          # optional: passes --model to hermes
 
-# Optional pre-hooks (run before hermes)
+# Optional pre-hooks (run before the agent harness)
 [[steps.pre_hooks]]
 type = "script"
 command = "scripts/validate.sh"
 args = ["{{issue_number}}"]
 
-# Optional post-hooks (run after hermes)
+# Optional post-hooks (run after the agent harness)
 [[steps.post_hooks]]
 type = "file_non_empty"
 path = "{{output_path}}/my-step.md"
@@ -191,7 +242,7 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 ## Debugging a failed issue
 
 Failed issues are written to `<data-dir>/failed.json` with a timestamp and error
-message. The stderr capture for the failing hermes invocation is written to
+message. The stderr capture for the failing harness invocation is written to
 `<data-dir>/{owner}/{repo}/{issue_number}/step_NN_<name>.error`.
 
 To retry a failed issue, restart the daemon (the `permanently_failed` set is

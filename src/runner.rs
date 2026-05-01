@@ -1,13 +1,11 @@
 use crate::git;
-use crate::hermes::{InvokeArgs, invoke};
+use crate::hooks;
 use crate::template::render;
-use crate::workflow::{Hook, Step};
+use crate::workflow::Step;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Command, Stdio};
 use tracing::info_span;
 
 /// Identifies a GitHub issue uniquely.
@@ -20,75 +18,6 @@ pub struct IssueKey {
 impl std::fmt::Display for IssueKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}#{}", self.owner, self.repo, self.number)
-    }
-}
-
-/// Execute a single hook, resolving any template placeholders in its arguments.
-///
-/// On failure writes a human-readable message to `error_path` and returns Err.
-fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Result<()> {
-    match hook {
-        Hook::FileNonEmpty { path: raw_path } => {
-            let path = render(raw_path, vars);
-            match fs::metadata(&path) {
-                Ok(m) if m.len() > 0 => Ok(()),
-                Ok(_) => {
-                    let msg = format!("hook FileNonEmpty: file is empty: {}", path);
-                    let _ = fs::write(error_path, &msg);
-                    anyhow::bail!("{}", msg);
-                }
-                Err(e) => {
-                    let msg = format!("hook FileNonEmpty: file missing ({}): {}", path, e);
-                    let _ = fs::write(error_path, &msg);
-                    anyhow::bail!("{}", msg);
-                }
-            }
-        }
-
-        Hook::Script { command, args } => {
-            let resolved_args: Vec<String> = args.iter().map(|a| render(a, vars)).collect();
-
-            tracing::info!(command, args = resolved_args.join(" "), "running hook");
-
-            let mut child = Command::new(command)
-                .args(&resolved_args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| {
-                    anyhow::anyhow!("hook Script: failed to spawn `{}`: {}", command, e)
-                })?;
-
-            // Stream stderr on a dedicated thread (avoids pipe deadlock).
-            let stderr_stream = child.stderr.take();
-            let stderr_thread = std::thread::spawn(move || {
-                if let Some(stderr) = stderr_stream {
-                    let reader = BufReader::new(stderr);
-                    for line in reader.lines().map_while(Result::ok) {
-                        tracing::error!(stderr = true, "{}", line);
-                    }
-                }
-            });
-
-            if let Some(stdout) = child.stdout.take() {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines().map_while(Result::ok) {
-                    tracing::info!("{}", line);
-                }
-            }
-
-            let _ = stderr_thread.join();
-            let status = child.wait()?;
-
-            if status.success() {
-                Ok(())
-            } else {
-                let code = status.code().unwrap_or(-1);
-                let msg = format!("hook Script: `{}` exited with code {}", command, code);
-                let _ = fs::write(error_path, &msg);
-                anyhow::bail!("{}", msg);
-            }
-        }
     }
 }
 
@@ -136,19 +65,20 @@ pub async fn run_issue(
             .map(|(k, v)| (k.as_str(), v.clone()))
             .collect();
 
-        // Create a span for the entire step iteration — pre-hooks, hermes,
+        // Create a span for the entire step iteration — pre-hooks, agent,
         // post-hooks, and all their log output inherit this context.
         let span = info_span!(
             "step",
             profile = %step.profile,
             issue = %key,
             step_name = %step.name,
+            harness = %step.harness.build().name(),
         );
         let _enter = span.enter();
 
         // --- Pre-hooks -----------------------------------------------------------
         for hook in &step.pre_hooks {
-            run_hook(hook, &vars, &error_path).map_err(|e| {
+            hooks::run_hook(hook, &vars, &error_path).map_err(|e| {
                 tracing::error!(step = step.name, "pre-hook FAILED: {}", e);
                 e
             })?;
@@ -156,30 +86,16 @@ pub async fn run_issue(
 
         tracing::info!("started");
 
-        // hermes::invoke is sync; run it in a blocking thread pool.
-        let hermes_args = InvokeArgs {
-            prompt: render(&step.prompt_template, &vars),
-            profile: step.profile.clone(),
-            worktree: step.worktree,
-            provider: step.provider.clone(),
-            model: step.model.clone(),
-            error_file: error_path.clone(),
-            work_dir: Some(workspace_dir.clone()),
-        };
-
-        // Clone the span so that spawn_blocking carries it into the new thread.
-        let hermes_span = span.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let _enter = hermes_span.enter();
-            invoke(&hermes_args)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))?;
-        result?;
+        // Build the harness from the step config and run it.
+        let harness = step.harness.build();
+        let rendered_prompt = render(&step.prompt_template, &vars);
+        harness
+            .run_step(step, &workspace_dir, &rendered_prompt, &error_path)
+            .await?;
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {
-            run_hook(hook, &vars, &error_path).map_err(|e| {
+            hooks::run_hook(hook, &vars, &error_path).map_err(|e| {
                 tracing::error!(step = step.name, "post-hook FAILED: {}", e);
                 e
             })?;

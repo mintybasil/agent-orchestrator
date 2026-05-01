@@ -1,6 +1,5 @@
 use anyhow::Result;
 use chrono::Utc;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -8,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, interval};
 
 use crate::config::Config;
-use crate::github::list_assigned_issues;
 use crate::runner::{IssueKey, run_issue};
+use crate::trigger::Trigger;
 use crate::workflow;
 
 #[derive(Serialize, Deserialize)]
@@ -30,52 +29,49 @@ pub async fn run_poll_loop(
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let file_lock: Arc<std::sync::Mutex<()>> = Arc::new(std::sync::Mutex::new(()));
-    let client = Client::new();
     let mut ticker = interval(Duration::from_secs(config.poll_interval_secs));
-    let workflow_steps = std::sync::Arc::new(workflow_steps);
+    let workflow_steps = Arc::new(workflow_steps);
+
+    // Build triggers from config
+    let triggers: Vec<Box<dyn Trigger + Send>> = config
+        .triggers
+        .iter()
+        .map(|tc| tc.build())
+        .collect();
+
+    let repos = config.repos.clone();
 
     loop {
         ticker.tick().await;
-        tracing::info!("poll tick: checking {} repos", config.repos.len());
 
-        for repo_cfg in &config.repos {
-            let mut seen_numbers = std::collections::HashSet::new();
-            let mut issues = Vec::new();
-            for creator in &config.allowed_issue_creators {
-                match list_assigned_issues(
-                    &client,
-                    &repo_cfg.owner,
-                    &repo_cfg.repo,
-                    &config.assigned_to,
-                    creator,
-                    &token,
-                )
-                .await
-                {
-                    Err(e) => {
-                        tracing::error!(
-                            "GitHub API error for {}/{} (creator={}): {}",
-                            repo_cfg.owner,
-                            repo_cfg.repo,
-                            creator,
-                            e
-                        );
-                    }
-                    Ok(page) => {
-                        for issue in page {
-                            if seen_numbers.insert(issue.number) {
-                                issues.push(issue);
-                            }
-                        }
-                    }
+        for trigger in &triggers {
+            tracing::info!("poll tick: trigger={}, checking {} repos", trigger.name(), repos.len());
+
+            let events = match trigger.poll(&repos, &token).await {
+                Ok(events) => events,
+                Err(e) => {
+                    tracing::error!("trigger {} poll failed: {}", trigger.name(), e);
+                    continue;
                 }
-            }
-            for issue in issues {
-                let key_str = format!("{}/{}/{}", repo_cfg.owner, repo_cfg.repo, issue.number);
+            };
+
+            for event in events {
+                // Build dedup key from owner/repo/event_key
+                let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
+
+                // Parse the issue number from the event key
+                let issue_number: u64 = match event.key.parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        tracing::warn!("trigger event key is not a number: {}", event.key);
+                        continue;
+                    }
+                };
+
                 let issue_key = IssueKey {
-                    owner: repo_cfg.owner.clone(),
-                    repo: repo_cfg.repo.clone(),
-                    number: issue.number,
+                    owner: event.owner.clone(),
+                    repo: event.repo.clone(),
+                    number: issue_number,
                 };
 
                 // Skip if completed

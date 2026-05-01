@@ -1,6 +1,8 @@
+use crate::harness::Harness;
+use crate::workflow::Step;
 use anyhow::Result;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tracing::Span;
@@ -115,5 +117,34 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
             tracing::warn!("failed to write error file {:?}: {}", args.error_file, e);
         }
         anyhow::bail!("hermes exited with code {}", code);
+    }
+}
+
+/// Harness implementation for the hermes CLI agent.
+pub struct HermesHarness;
+
+impl Harness for HermesHarness {
+    fn name(&self) -> &str {
+        "hermes"
+    }
+
+    fn run_step(
+        &self,
+        step: &Step,
+        workspace_dir: &Path,
+        rendered_prompt: &str,
+        error_path: &Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
+        let args = InvokeArgs {
+            prompt: rendered_prompt.to_string(),
+            profile: step.profile.clone(),
+            worktree: step.worktree,
+            provider: step.provider.clone(),
+            model: step.model.clone(),
+            error_file: error_path.to_path_buf(),
+            work_dir: Some(workspace_dir.to_path_buf()),
+        };
+
+        Box::pin(async move { tokio::task::spawn_blocking(move || invoke(&args)).await? })
     }
 }
