@@ -29,9 +29,7 @@ pub enum TriggerConfig {
         allowed_users: Vec<String>,
     },
     /// Poll GitHub for PR reviews/comments by allowed users.
-    GithubPrReview {
-        allowed_users: Vec<String>,
-    },
+    GithubPrReview { allowed_users: Vec<String> },
 }
 
 /// Runtime trigger: produces events that initiate workflow runs.
@@ -65,9 +63,7 @@ impl TriggerConfig {
                 assigned_to: assigned_to.clone(),
                 allowed_users: allowed_users.clone(),
             }),
-            TriggerConfig::GithubPrReview {
-                allowed_users,
-            } => Box::new(GithubPrReviewTrigger {
+            TriggerConfig::GithubPrReview { allowed_users } => Box::new(GithubPrReviewTrigger {
                 client: reqwest::Client::new(),
                 allowed_users: allowed_users.clone(),
             }),
@@ -261,9 +257,7 @@ allowed_users = ["alice", "bob"]
 "#;
         let config: TriggerConfig = toml::from_str(toml).unwrap();
         match config {
-            TriggerConfig::GithubPrReview {
-                allowed_users,
-            } => {
+            TriggerConfig::GithubPrReview { allowed_users } => {
                 assert_eq!(allowed_users, vec!["alice", "bob"]);
             }
             _ => panic!("expected GithubPrReview variant"),

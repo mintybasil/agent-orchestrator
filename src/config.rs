@@ -228,9 +228,7 @@ harness = { type = "hermes", profile = "cto" }
             other => panic!("expected GithubIssueAssigned, got {:?}", other),
         }
         match &config.triggers[1] {
-            TriggerConfig::GithubPrReview {
-                allowed_users,
-            } => {
+            TriggerConfig::GithubPrReview { allowed_users } => {
                 assert_eq!(allowed_users, &vec!["eve"]);
             }
             other => panic!("expected GithubPrReview, got {:?}", other),
