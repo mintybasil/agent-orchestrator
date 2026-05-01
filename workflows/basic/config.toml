@@ -1,4 +1,7 @@
 poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
 assigned_to = "zeroklaw"
 allowed_issue_creators = ["mintybasil", "zeroklaw"]
 
@@ -16,7 +19,7 @@ repo = "bento-bench"
 [[steps]]
 name = "Plan"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Use the writing-plans skill, and store the plan in {{output_path}}/plan.md."
-profile = "pm"
+harness = { type = "hermes", profile = "pm" }
 
 [[steps.post_hooks]]
 type = "file_not_empty"
@@ -25,6 +28,5 @@ path = "{{output_path}}/plan.md"
 [[steps]]
 name = "Implement"
 prompt_template = "We have a plan in {{output_path}}/plan.md to address issue #{{issue_number}} in {{owner}}/{{repo}}. Use the executing-plans skill to implement the plan. Push your changes to a new branch (zeroklaw/<branch-name>) and open a PR. Once the PR is open, check that the CI passes. If it fails, fix it."
-profile = "swe"
-worktree = true
+harness = { type = "hermes", profile = "swe", worktree = true }
 
