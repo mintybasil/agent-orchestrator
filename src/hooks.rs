@@ -21,7 +21,7 @@ use std::process::{Command, Stdio};
 pub enum Hook {
     /// Assert that the file at `path` exists and contains at least one byte.
     /// `path` may contain template placeholders (e.g. `"{{output_path}}"`).
-    FileNonEmpty { path: String },
+    FileNotEmpty { path: String },
 
     /// Spawn an external process.
     ///
@@ -35,17 +35,17 @@ pub enum Hook {
 /// On failure writes a human-readable message to `error_path` and returns Err.
 pub fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Result<()> {
     match hook {
-        Hook::FileNonEmpty { path: raw_path } => {
+        Hook::FileNotEmpty { path: raw_path } => {
             let path = render(raw_path, vars);
             match fs::metadata(&path) {
                 Ok(m) if m.len() > 0 => Ok(()),
                 Ok(_) => {
-                    let msg = format!("hook FileNonEmpty: file is empty: {}", path);
+                    let msg = format!("hook FileNotEmpty: file is empty: {}", path);
                     let _ = fs::write(error_path, &msg);
                     anyhow::bail!("{}", msg);
                 }
                 Err(e) => {
-                    let msg = format!("hook FileNonEmpty: file missing ({}): {}", path, e);
+                    let msg = format!("hook FileNotEmpty: file missing ({}): {}", path, e);
                     let _ = fs::write(error_path, &msg);
                     anyhow::bail!("{}", msg);
                 }
@@ -111,7 +111,7 @@ type = "file_not_empty"
 path = "{{output_path}}"
 "#;
         let hook: Hook = toml::from_str(toml).unwrap();
-        assert!(matches!(hook, Hook::FileNonEmpty { .. }));
+        assert!(matches!(hook, Hook::FileNotEmpty { .. }));
     }
 
     #[test]
@@ -137,7 +137,7 @@ args = ["clippy"]
         f.write_all(b"content").unwrap();
         let path = f.path().to_string_lossy().into_owned();
 
-        let hook = Hook::FileNonEmpty { path };
+        let hook = Hook::FileNotEmpty { path };
         let mut vars = HashMap::new();
         vars.insert("output_path", "/tmp".to_string());
         let error_path = tempfile::NamedTempFile::new().unwrap();
@@ -146,7 +146,7 @@ args = ["clippy"]
 
     #[test]
     fn file_not_empty_fails_for_missing_file() {
-        let hook = Hook::FileNonEmpty {
+        let hook = Hook::FileNotEmpty {
             path: "/nonexistent/file.xyz".to_string(),
         };
         let vars = HashMap::new();
@@ -159,7 +159,7 @@ args = ["clippy"]
         let f = tempfile::NamedTempFile::new().unwrap();
         let path = f.path().to_string_lossy().into_owned();
 
-        let hook = Hook::FileNonEmpty { path };
+        let hook = Hook::FileNotEmpty { path };
         let vars = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
         assert!(run_hook(&hook, &vars, error_path.path()).is_err());

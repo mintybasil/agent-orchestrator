@@ -66,7 +66,7 @@ path = "{{output_path}}"
         assert_eq!(config.steps[0].post_hooks.len(), 1);
         assert!(matches!(
             config.steps[0].post_hooks[0],
-            crate::hooks::Hook::FileNonEmpty { .. }
+            crate::hooks::Hook::FileNotEmpty { .. }
         ));
     }
 
