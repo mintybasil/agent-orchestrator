@@ -34,8 +34,11 @@ async fn main() {
 
     let workflow_steps = config.steps.clone();
 
-    // Init tracing (after config so RUST_LOG is readable)
+    // Use the compact formatter so span fields (profile, issue, step_name)
+    // appear on every event line, making it easy to tell which issue
+    // produced each log line when multiple run concurrently.
     tracing_subscriber::fmt()
+        .compact()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),

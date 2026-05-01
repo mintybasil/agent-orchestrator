@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+use tracing::Span;
 
 /// Arguments for invoking the hermes CLI agent.
 ///
@@ -23,15 +24,16 @@ pub struct InvokeArgs {
 /// Always passes `--yolo`. If `work_dir` is provided, hermes runs from that
 /// directory (which becomes its project root).
 ///
-/// `issue_tag` is a short identifier like `owner/repo#123` — it replaces the
-/// old generic `[hermes]` log prefix so that interleaved output from multiple
-/// concurrent issues can be told apart. The profile name is also included,
-/// making the prefix `[<profile> <issue_tag>]`.
+/// The caller should set up a `tracing::info_span!` with context fields
+/// (profile, issue, step) before calling this function. All stdout/stderr
+/// events emitted here will be annotated with that span automatically.
 ///
-/// Streams stdout/stderr to `tracing::info!` / `tracing::error!` line by line.
+/// The current span is propagated to the stderr drain thread via
+/// `Span::current()` so that concurrent stderr output is also annotated.
+///
 /// Returns `Ok(())` on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns `Err`.
-pub fn invoke(args: &InvokeArgs, issue_tag: &str) -> Result<()> {
+pub fn invoke(args: &InvokeArgs) -> Result<()> {
     let mut cmd = Command::new("hermes");
     if let Some(dir) = &args.work_dir {
         cmd.current_dir(dir);
@@ -55,48 +57,44 @@ pub fn invoke(args: &InvokeArgs, issue_tag: &str) -> Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "[{} {}] failed to spawn hermes: {}",
-                args.profile,
-                issue_tag,
-                e
-            )
-        })?;
+        .map_err(|e| anyhow::anyhow!("failed to spawn hermes: {}", e))?;
 
     let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-    let log_prefix = format!("[{} {}]", args.profile, issue_tag);
+
+    // Propagate the current tracing span to the stderr drain thread so that
+    // concurrent stderr output carries the same span context as stdout.
+    let parent_span = Span::current();
 
     // Drain stderr on a dedicated thread (concurrent with stdout drain)
     let stderr_stream = child.stderr.take();
     let stderr_capture_clone = Arc::clone(&stderr_capture);
-    let log_prefix_stderr = log_prefix.clone();
     let stderr_thread = std::thread::spawn(move || {
+        let _enter = parent_span.enter();
         if let Some(stderr) = stderr_stream {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
                 match line {
                     Ok(l) => {
-                        tracing::error!("{} stderr: {}", log_prefix_stderr, l);
+                        tracing::error!(stderr = true, "{}", l);
                         let mut cap = stderr_capture_clone
                             .lock()
                             .unwrap_or_else(|e| e.into_inner());
                         cap.push_str(&l);
                         cap.push('\n');
                     }
-                    Err(e) => tracing::warn!("{} stderr read error: {}", log_prefix_stderr, e),
+                    Err(e) => tracing::warn!(stderr = true, "read error: {}", e),
                 }
             }
         }
     });
 
-    // Drain stdout in this thread
+    // Drain stdout in this thread (already inside the caller's span)
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             match line {
-                Ok(l) => tracing::info!("{} {}", log_prefix, l),
-                Err(e) => tracing::warn!("{} stdout read error: {}", log_prefix, e),
+                Ok(l) => tracing::info!("{}", l),
+                Err(e) => tracing::warn!("stdout read error: {}", e),
             }
         }
     }
@@ -116,11 +114,6 @@ pub fn invoke(args: &InvokeArgs, issue_tag: &str) -> Result<()> {
         if let Err(e) = std::fs::write(&args.error_file, &stderr_text) {
             tracing::warn!("failed to write error file {:?}: {}", args.error_file, e);
         }
-        anyhow::bail!(
-            "[{} {}] hermes exited with code {}",
-            args.profile,
-            issue_tag,
-            code
-        );
+        anyhow::bail!("hermes exited with code {}", code);
     }
 }
