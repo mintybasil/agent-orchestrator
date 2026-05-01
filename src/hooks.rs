@@ -208,7 +208,16 @@ type = "push_code"
         let mut vars = HashMap::new();
         vars.insert("output_path", "/tmp".to_string());
         let error_path = tempfile::NamedTempFile::new().unwrap();
-        assert!(run_hook(&hook, &vars, error_path.path(), "fake-token", Path::new("/fake/exe")).is_ok());
+        assert!(
+            run_hook(
+                &hook,
+                &vars,
+                error_path.path(),
+                "fake-token",
+                Path::new("/fake/exe")
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -218,7 +227,16 @@ type = "push_code"
         };
         let vars = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
-        assert!(run_hook(&hook, &vars, error_path.path(), "fake-token", Path::new("/fake/exe")).is_err());
+        assert!(
+            run_hook(
+                &hook,
+                &vars,
+                error_path.path(),
+                "fake-token",
+                Path::new("/fake/exe")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -229,6 +247,15 @@ type = "push_code"
         let hook = Hook::FileNonEmpty { path };
         let vars = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
-        assert!(run_hook(&hook, &vars, error_path.path(), "fake-token", Path::new("/fake/exe")).is_err());
+        assert!(
+            run_hook(
+                &hook,
+                &vars,
+                error_path.path(),
+                "fake-token",
+                Path::new("/fake/exe")
+            )
+            .is_err()
+        );
     }
 }
