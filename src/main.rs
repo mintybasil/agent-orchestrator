@@ -30,7 +30,7 @@ async fn main() {
     let config = match config::Config::load(&cli.config) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("ERROR: failed to load config {:?}: {}", cli.config, e);
+            eprintln!("ERROR: {e}");
             std::process::exit(1);
         }
     };

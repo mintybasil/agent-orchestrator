@@ -1,6 +1,5 @@
 use crate::trigger::TriggerConfig;
 use crate::workflow::Step;
-use anyhow::Context;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
@@ -27,9 +26,12 @@ pub struct RepoConfig {
 impl Config {
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading config from {:?}", path))?;
-        let config: Self =
-            toml::from_str(&text).with_context(|| format!("parsing config from {:?}", path))?;
+            .map_err(|e| anyhow::anyhow!("reading config from {:?}: {}", path, e))?;
+        let config: Self = toml::from_str(&text).map_err(|e| {
+            // Include the full TOML deserialization detail in the error message
+            // so users see *why* parsing failed (unknown variant, missing field, etc.)
+            anyhow::anyhow!("parsing config from {:?}: {}", path, e)
+        })?;
 
         anyhow::ensure!(
             !config.triggers.is_empty(),
@@ -146,9 +148,42 @@ harness = { type = "hermes", profile = "cto" }
         f.write_all(toml.as_bytes()).unwrap();
         let err = Config::load(f.path()).unwrap_err();
         let msg = err.to_string();
+        assert!(msg.contains("trigger"), "expected 'trigger' in error: {msg}");
+    }
+
+    #[test]
+    fn toml_parse_error_includes_detail() {
+        use std::io::Write;
+        // Use an unknown hook variant to trigger a TOML deserialization error
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "test"
+allowed_issue_creators = ["test"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+
+[[steps.post_hooks]]
+type = "file_not_empty"
+path = "{{output_path}}"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        // The error should include the TOML detail (e.g. "unknown variant")
         assert!(
-            msg.contains("trigger"),
-            "expected 'trigger' in error: {msg}"
+            msg.contains("file_not_empty") || msg.contains("unknown variant"),
+            "expected TOML error detail in error message, got: {msg}"
         );
     }
 }
