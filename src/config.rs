@@ -6,18 +6,14 @@ use anyhow::Context;
 pub struct Config {
     pub poll_interval_secs: u64,
 
-    /// New-style trigger configuration.
+    /// Trigger configuration — what initiates workflow runs.
+    /// Empty vec is allowed at deserialization but rejected by Config::load.
     #[serde(default)]
     pub triggers: Vec<TriggerConfig>,
 
-    /// Backward-compat: if triggers is empty, these legacy fields are used to
-    /// build a GithubIssueAssigned trigger automatically.
-    pub assigned_to: Option<String>,
-    #[serde(default)]
-    pub allowed_issue_creators: Option<Vec<String>>,
-
     pub repos: Vec<RepoConfig>,
 
+    /// Steps to execute. Empty vec is allowed at deserialization but rejected by Config::load.
     #[serde(default)]
     pub steps: Vec<Step>,
 }
@@ -32,27 +28,12 @@ impl Config {
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading config from {:?}", path))?;
-        let mut config: Self =
+        let config: Self =
             toml::from_str(&text).with_context(|| format!("parsing config from {:?}", path))?;
-
-        // Backward compatibility: if no explicit [[triggers]] but legacy fields
-        // are present, synthesize a GithubIssueAssigned trigger.
-        if config.triggers.is_empty()
-            && let Some(ref assigned_to) = config.assigned_to
-        {
-                let creators = config
-                    .allowed_issue_creators
-                    .clone()
-                    .unwrap_or_else(|| vec![assigned_to.clone()]);
-                config.triggers.push(TriggerConfig::GithubIssueAssigned {
-                    assigned_to: assigned_to.clone(),
-                    allowed_issue_creators: creators,
-                });
-            }
 
         anyhow::ensure!(
             !config.triggers.is_empty(),
-            "config {:?} must define at least one [[triggers]] entry or set assigned_to",
+            "config {:?} must define at least one [[triggers]] entry",
             path
         );
         anyhow::ensure!(
@@ -106,39 +87,7 @@ mod tests {
     }
 
     #[test]
-    fn backward_compat_assigned_to_builds_trigger() {
-        use std::io::Write;
-        let toml = r#"
-poll_interval_secs = 60
-assigned_to = "alice"
-allowed_issue_creators = ["bob"]
-
-[[repos]]
-owner = "o"
-repo = "r"
-
-[[steps]]
-name = "test"
-prompt_template = "do thing"
-profile = "cto"
-"#;
-        let mut f = tempfile::NamedTempFile::new().unwrap();
-        f.write_all(toml.as_bytes()).unwrap();
-        let config = Config::load(f.path()).unwrap();
-        assert_eq!(config.triggers.len(), 1);
-        match &config.triggers[0] {
-            TriggerConfig::GithubIssueAssigned {
-                assigned_to,
-                allowed_issue_creators,
-            } => {
-                assert_eq!(assigned_to, "alice");
-                assert_eq!(allowed_issue_creators, &vec!["bob"]);
-            }
-        }
-    }
-
-    #[test]
-    fn explicit_triggers_override_legacy_fields() {
+    fn explicit_trigger_deserializes() {
         use std::io::Write;
         let toml = r#"
 poll_interval_secs = 60
@@ -155,7 +104,7 @@ repo = "r"
 [[steps]]
 name = "test"
 prompt_template = "do thing"
-profile = "cto"
+harness = { type = "hermes", profile = "cto" }
 "#;
         let mut f = tempfile::NamedTempFile::new().unwrap();
         f.write_all(toml.as_bytes()).unwrap();
@@ -170,10 +119,16 @@ profile = "cto"
                 assert_eq!(allowed_issue_creators, &vec!["dave"]);
             }
         }
+        // Verify step harness loaded
+        match &config.steps[0].harness {
+            crate::harness::HarnessConfig::Hermes { profile, .. } => {
+                assert_eq!(profile, "cto");
+            }
+        }
     }
 
     #[test]
-    fn no_triggers_no_assigned_to_errors() {
+    fn no_triggers_errors() {
         use std::io::Write;
         let toml = r#"
 poll_interval_secs = 60
@@ -185,11 +140,12 @@ repo = "r"
 [[steps]]
 name = "test"
 prompt_template = "do thing"
-profile = "cto"
+harness = { type = "hermes", profile = "cto" }
 "#;
         let mut f = tempfile::NamedTempFile::new().unwrap();
         f.write_all(toml.as_bytes()).unwrap();
         let err = Config::load(f.path()).unwrap_err();
-        assert!(err.to_string().contains("triggers"));
+        let msg = err.to_string();
+        assert!(msg.contains("trigger"), "expected 'trigger' in error: {msg}");
     }
 }

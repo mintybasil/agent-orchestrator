@@ -33,14 +33,14 @@ src/
   config.rs     -- Config struct (TOML) + clap CLI (--config flag)
   git.rs        -- Git workspace management: clone/pull with ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
-  harness.rs    -- Pluggable agent harness trait + HarnessConfig enum
+  harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, JSON persistence
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks)
   template.rs   -- {{key}} placeholder renderer + unit tests
   trigger.rs    -- Generalized trigger trait + TriggerConfig enum
-  workflow.rs   -- Step type; re-exports Hook from hooks.rs
+  workflow.rs   -- Step type (harness-agnostic; harness-specific options live in HarnessConfig)
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
 data/                -- Runtime data dir (gitignored); created on first run
 ```
@@ -62,8 +62,7 @@ Adding a new trigger type:
 
 ### Hooks
 
-Hooks are pre/post step checks. They live in `src/hooks.rs` and are
-re-exported from `workflow.rs` for backward compat.
+Hooks are pre/post step checks. They live in `src/hooks.rs`.
 
 Adding a new hook type:
 1. Add a variant to the `Hook` enum in `src/hooks.rs`
@@ -74,11 +73,16 @@ Adding a new hook type:
 Harnesses define **which agent backend runs a step**. They implement the
 `Harness` trait and are specified per-step via the `harness` field.
 
+Each `HarnessConfig` variant carries **harness-specific options** — the Step
+struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
+`profile`, `worktree`, `provider`, and `model` because those are hermes CLI
+flags, not generic step concerns.
+
 Currently supported:
 - `hermes` — invokes the hermes CLI agent
 
 Adding a new harness:
-1. Add a variant to `HarnessConfig` in `src/harness.rs`
+1. Add a variant to `HarnessConfig` in `src/harness.rs` (with its specific fields)
 2. Add a struct implementing `Harness`
 3. Add a match arm in `HarnessConfig::build()`
 4. (Optional) Add a startup validation in `main.rs`
@@ -144,16 +148,16 @@ until GitHub returns an empty page. `per_page=100` minimises round trips.
 
 ## Hermes invocation (HermesHarness)
 
-When `harness = { type = "hermes" }` (the default), each step calls `hermes chat`:
+When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 
 | Flag | Source | Required |
 |---|---|---|
 | `-p <prompt>` | Rendered `prompt_template` | always |
 | `--yolo` | hardcoded | always |
-| `--profile <name>` | `profile` field on step | always |
-| `--worktree` | `worktree = true` on step | optional |
-| `--provider <name>` | `provider` field on step | optional |
-| `--model <name>` | `model` field on step | optional |
+| `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
+| `--worktree` | `worktree = true` in HarnessConfig::Hermes | optional |
+| `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
+| `--model <name>` | `model` field in HarnessConfig::Hermes | optional |
 
 Before the first step runs, the orchestrator clones the target repo into
 `<data-dir>/<owner>/<repo>/workspace/` (or pulls latest `main` if it already
@@ -178,20 +182,14 @@ assigned_to = "your-github-username"
 allowed_issue_creators = ["your-github-username"]
 ```
 
-Backward compatible: if no `[[triggers]]` is defined, the legacy `assigned_to`
-and `allowed_issue_creators` top-level fields are used to synthesize a trigger.
-
 ### Step format
 
 ```toml
 [[steps]]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
-profile = "cto"         # required: passed to hermes as --profile
-harness = { type = "hermes" }  # optional, defaults to hermes
-# worktree = true       # optional: passes --worktree to hermes
-# provider = "openai"   # optional: passes --provider to hermes
-# model = "o3"          # optional: passes --model to hermes
+harness = { type = "hermes", profile = "cto" }
+# harness = { type = "hermes", profile = "cto", worktree = true, provider = "openai", model = "o3" }
 
 # Optional pre-hooks (run before the agent harness)
 [[steps.pre_hooks]]

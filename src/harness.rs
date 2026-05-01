@@ -1,6 +1,7 @@
 //! Pluggable agent harness system.
 //!
 //! A harness is the agent backend that executes a workflow step.
+//! Each variant carries its own harness-specific configuration.
 //! Currently only Hermes is supported, but this trait allows
 //! adding cursor, claude-code, etc. in the future.
 
@@ -9,14 +10,34 @@ use anyhow::Result;
 use std::path::Path;
 
 /// Config-side harness definition deserialized from TOML.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+///
+/// Each variant carries harness-specific options. For example,
+/// `Hermes` has `profile`, `worktree`, `provider`, and `model`,
+/// because those are hermes CLI flags — not generic step concerns.
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HarnessConfig {
-    #[default]
-    Hermes,
+    /// Invoke the hermes CLI agent.
+    ///
+    /// ```toml
+    /// harness = { type = "hermes", profile = "cto", worktree = true, provider = "openai", model = "o3" }
+    /// ```
+    Hermes {
+        /// Required: hermes profile name passed via `--profile <name>`.
+        profile: String,
+        /// When true, passes `--worktree` to hermes.
+        #[serde(default)]
+        worktree: bool,
+        /// Optional provider passed to hermes via `--provider <provider>`.
+        #[serde(default)]
+        provider: Option<String>,
+        /// Optional model passed to hermes via `--model <model>`.
+        #[serde(default)]
+        model: Option<String>,
+    },
     // Future variants:
-    // Cursor { binary: String },
-    // ClaudeCode { binary: String },
+    // Cursor { binary: String, prompt: String },
+    // ClaudeCode { binary: String, prompt: String },
 }
 
 /// Runtime harness trait — each agent backend implements this.
@@ -41,7 +62,17 @@ pub trait Harness {
 impl HarnessConfig {
     pub fn build(&self) -> Box<dyn Harness + Send> {
         match self {
-            HarnessConfig::Hermes => Box::new(crate::hermes::HermesHarness),
+            HarnessConfig::Hermes {
+                profile,
+                worktree,
+                provider,
+                model,
+            } => Box::new(crate::hermes::HermesHarness {
+                profile: profile.clone(),
+                worktree: *worktree,
+                provider: provider.clone(),
+                model: model.clone(),
+            }),
         }
     }
 }
@@ -52,19 +83,60 @@ mod tests {
 
     #[test]
     fn hermes_config_deserializes() {
-        let toml = r#"type = "hermes""#;
+        let toml = r#"
+type = "hermes"
+profile = "cto"
+worktree = true
+provider = "openai"
+model = "o3"
+"#;
         let config: HarnessConfig = toml::from_str(toml).unwrap();
-        assert!(matches!(config, HarnessConfig::Hermes));
+        match config {
+            HarnessConfig::Hermes {
+                profile,
+                worktree,
+                provider,
+                model,
+            } => {
+                assert_eq!(profile, "cto");
+                assert!(worktree);
+                assert_eq!(provider, Some("openai".to_string()));
+                assert_eq!(model, Some("o3".to_string()));
+            }
+        }
     }
 
     #[test]
-    fn default_is_hermes() {
-        assert!(matches!(HarnessConfig::default(), HarnessConfig::Hermes));
+    fn hermes_config_minimal() {
+        let toml = r#"
+type = "hermes"
+profile = "cto"
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::Hermes {
+                profile,
+                worktree,
+                provider,
+                model,
+            } => {
+                assert_eq!(profile, "cto");
+                assert!(!worktree);
+                assert!(provider.is_none());
+                assert!(model.is_none());
+            }
+        }
     }
 
     #[test]
     fn build_hermes() {
-        let harness = HarnessConfig::Hermes.build();
+        let config = HarnessConfig::Hermes {
+            profile: "cto".to_string(),
+            worktree: false,
+            provider: None,
+            model: None,
+        };
+        let harness = config.build();
         assert_eq!(harness.name(), "hermes");
     }
 }

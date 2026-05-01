@@ -17,24 +17,24 @@ repo = "your-repo"
 [[steps]]
 name = "Plan"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Use the triage-summary skill and write the result to {{output_path}}/plan.md."
-profile = "pm"
+harness = { type = "hermes", profile = "pm" }
 
 [[steps]]
 name = "Implement"
 prompt_template = "Implement the plan at {{output_path}}/plan.md using the subagent-driven-development skill. Write a summary of what you did to {{output_path}}/implementation.md."
-profile = "swe"
+harness = { type = "hermes", profile = "swe", worktree = true }
 
 [[steps]]
 name = "Review"
 prompt_template = "Use the requesting-code-review skill to produce {{output_path}}/review.md."
-profile = "swe"
+harness = { type = "hermes", profile = "swe" }
 
 [[steps]]
 name = "Remedy"
 prompt_template = "Use the receiving-code-review skill to address the review in {{output_path}}/review.md. Update {{output_path}}/implementation.md to reflect the changes you have made."
-profile = "swe"
+harness = { type = "hermes", profile = "swe" }
 
 [[steps]]
 name = "Finalize"
 prompt_template = "Use the finalize-task skill."
-profile = "pm"
+harness = { type = "hermes", profile = "pm" }

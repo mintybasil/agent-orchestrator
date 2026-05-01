@@ -1,35 +1,24 @@
 use serde::Deserialize;
 
-// Re-export Hook from the hooks module so external code using
-// crate::workflow::Hook still compiles during migration.
-pub use crate::hooks::Hook;
-
 use crate::harness::HarnessConfig;
 
 /// A single step in the agent workflow.
+///
+/// Steps are harness-agnostic: they only define *what* to do (name,
+/// prompt, hooks) and *which* harness to use. Harness-specific options
+/// (e.g. hermes profile, worktree, provider, model) live inside the
+/// `harness` field.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
     pub name: String,
     pub prompt_template: String,
     /// Hooks that run *before* the agent invocation.
     #[serde(default)]
-    pub pre_hooks: Vec<Hook>,
+    pub pre_hooks: Vec<crate::hooks::Hook>,
     /// Hooks that run *after* a successful agent invocation.
     #[serde(default)]
-    pub post_hooks: Vec<Hook>,
-    /// Optional hermes profile name passed via `--profile <name>`.
-    pub profile: String,
-    /// When true, passes `--worktree` to hermes.
-    #[serde(default)]
-    pub worktree: bool,
-    /// Optional provider passed to hermes via `--provider <provider>`.
-    #[serde(default)]
-    pub provider: Option<String>,
-    /// Optional model passed to hermes via `--model <model>`.
-    #[serde(default)]
-    pub model: Option<String>,
-    /// Agent harness to use for this step. Defaults to Hermes.
-    #[serde(default)]
+    pub post_hooks: Vec<crate::hooks::Hook>,
+    /// Agent harness to use for this step, including harness-specific options.
     pub harness: HarnessConfig,
 }
 
@@ -65,7 +54,7 @@ mod tests {
 [[steps]]
 name = "triage"
 prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
-profile = "test"
+harness = { type = "hermes", profile = "test" }
 
 [[steps.post_hooks]]
 type = "file_non_empty"
@@ -77,7 +66,7 @@ path = "{{output_path}}"
         assert_eq!(config.steps[0].post_hooks.len(), 1);
         assert!(matches!(
             config.steps[0].post_hooks[0],
-            Hook::FileNonEmpty { .. }
+            crate::hooks::Hook::FileNonEmpty { .. }
         ));
     }
 
@@ -87,7 +76,7 @@ path = "{{output_path}}"
 [[steps]]
 name = "lint"
 prompt_template = "Lint the code."
-profile = "test"
+harness = { type = "hermes", profile = "test" }
 
 [[steps.post_hooks]]
 type = "script"
@@ -97,7 +86,7 @@ args = ["clippy"]
         let config = parse_config(steps).unwrap();
         assert_eq!(config.steps.len(), 1);
         match &config.steps[0].post_hooks[0] {
-            Hook::Script { command, args } => {
+            crate::hooks::Hook::Script { command, args } => {
                 assert_eq!(command, "cargo");
                 assert_eq!(args, &["clippy"]);
             }
@@ -106,25 +95,46 @@ args = ["clippy"]
     }
 
     #[test]
-    fn step_default_harness_is_hermes() {
+    fn step_hermes_harness_with_profile() {
         let steps = r#"
 [[steps]]
 name = "triage"
 prompt_template = "Do triage."
-profile = "test"
+harness = { type = "hermes", profile = "cto" }
 "#;
         let config = parse_config(steps).unwrap();
-        assert!(matches!(
-            config.steps[0].harness,
-            crate::harness::HarnessConfig::Hermes
-        ));
+        match &config.steps[0].harness {
+            HarnessConfig::Hermes { profile, worktree, provider, model } => {
+                assert_eq!(profile, "cto");
+                assert!(!worktree);
+                assert!(provider.is_none());
+                assert!(model.is_none());
+            }
+        }
     }
 
     #[test]
     fn empty_steps_errors() {
         // Config::load rejects configs with no [[steps]]
-        let err = parse_config("").unwrap_err();
-        assert!(err.to_string().contains("no [[steps]]"));
+        // We need valid triggers but empty steps
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "test"
+allowed_issue_creators = ["test"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("steps"), "expected 'steps' in error: {msg}");
     }
 
     #[test]

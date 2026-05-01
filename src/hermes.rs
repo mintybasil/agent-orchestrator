@@ -121,7 +121,15 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
 }
 
 /// Harness implementation for the hermes CLI agent.
-pub struct HermesHarness;
+///
+/// Carries hermes-specific options (profile, worktree, provider, model)
+/// that were specified in the harness config, not on the generic Step.
+pub struct HermesHarness {
+    pub profile: String,
+    pub worktree: bool,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
 
 impl Harness for HermesHarness {
     fn name(&self) -> &str {
@@ -130,17 +138,17 @@ impl Harness for HermesHarness {
 
     fn run_step(
         &self,
-        step: &Step,
+        _step: &Step,
         workspace_dir: &Path,
         rendered_prompt: &str,
         error_path: &Path,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
         let args = InvokeArgs {
             prompt: rendered_prompt.to_string(),
-            profile: step.profile.clone(),
-            worktree: step.worktree,
-            provider: step.provider.clone(),
-            model: step.model.clone(),
+            profile: self.profile.clone(),
+            worktree: self.worktree,
+            provider: self.provider.clone(),
+            model: self.model.clone(),
             error_file: error_path.to_path_buf(),
             work_dir: Some(workspace_dir.to_path_buf()),
         };

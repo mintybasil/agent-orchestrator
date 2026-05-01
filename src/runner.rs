@@ -67,12 +67,12 @@ pub async fn run_issue(
 
         // Create a span for the entire step iteration — pre-hooks, agent,
         // post-hooks, and all their log output inherit this context.
+        let harness = step.harness.build();
         let span = info_span!(
             "step",
-            profile = %step.profile,
             issue = %key,
             step_name = %step.name,
-            harness = %step.harness.build().name(),
+            harness = %harness.name(),
         );
         let _enter = span.enter();
 
@@ -86,8 +86,7 @@ pub async fn run_issue(
 
         tracing::info!("started");
 
-        // Build the harness from the step config and run it.
-        let harness = step.harness.build();
+        // Run the harness.
         let rendered_prompt = render(&step.prompt_template, &vars);
         harness
             .run_step(step, &workspace_dir, &rendered_prompt, &error_path)

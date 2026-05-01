@@ -3,14 +3,9 @@ poll_interval_secs = 60
 # ── Triggers ──────────────────────────────────────────────────────────
 # What initiates a workflow run. Currently only github_issue_assigned
 # is supported. Multiple triggers can be defined.
-#
-# [[triggers]]
-# type = "github_issue_assigned"
-# assigned_to = "your-github-username"
-# allowed_issue_creators = ["your-github-username"]
 
-# Backward compatible: if no [[triggers]] is defined, the legacy fields
-# below are used to synthesize a github_issue_assigned trigger.
+[[triggers]]
+type = "github_issue_assigned"
 assigned_to = "your-github-username"
 allowed_issue_creators = ["your-github-username"]
 
@@ -27,8 +22,7 @@ repo = "your-repo"
 [[steps]]
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
-profile = "cto"
-# harness = { type = "hermes" }  # optional, defaults to hermes
+harness = { type = "hermes", profile = "cto" }
 # worktree = true       # optional: passes --worktree to hermes
 # provider = "openai"   # optional: passes --provider to hermes
 # model = "o3"          # optional: passes --model to hermes
@@ -36,7 +30,4 @@ profile = "cto"
 [[steps]]
 name = "implement"
 prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary of what you did to {{output_path}}/step_01_implement.md."
-profile = "cto"
-# worktree = true
-# provider = "openai"
-# model = "o3"
+harness = { type = "hermes", profile = "cto", worktree = true }
