@@ -26,7 +26,7 @@ pub enum TriggerConfig {
     /// Poll GitHub for issues assigned to a specific user.
     GithubIssueAssigned {
         assigned_to: String,
-        allowed_issue_creators: Vec<String>,
+        allowed_user_interactions: Vec<String>,
     },
     // Future variants:
     // PrReview { reviewers: Vec<String> },
@@ -59,11 +59,11 @@ impl TriggerConfig {
         match self {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_issue_creators,
+                allowed_user_interactions,
             } => Box::new(GithubIssueAssignedTrigger {
                 client: reqwest::Client::new(),
                 assigned_to: assigned_to.clone(),
-                allowed_issue_creators: allowed_issue_creators.clone(),
+                allowed_user_interactions: allowed_user_interactions.clone(),
             }),
         }
     }
@@ -74,7 +74,7 @@ impl TriggerConfig {
 pub struct GithubIssueAssignedTrigger {
     client: reqwest::Client,
     assigned_to: String,
-    allowed_issue_creators: Vec<String>,
+    allowed_user_interactions: Vec<String>,
 }
 
 impl Trigger for GithubIssueAssignedTrigger {
@@ -90,7 +90,7 @@ impl Trigger for GithubIssueAssignedTrigger {
         Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
     > {
         let assigned_to = self.assigned_to.clone();
-        let allowed_creators = self.allowed_issue_creators.clone();
+        let allowed_users = self.allowed_user_interactions.clone();
         let client = self.client.clone();
         let repos: Vec<RepoConfig> = repos.to_vec();
         let token = token.to_string();
@@ -99,13 +99,13 @@ impl Trigger for GithubIssueAssignedTrigger {
             let mut events = Vec::new();
             for repo_cfg in &repos {
                 let mut seen_numbers = std::collections::HashSet::new();
-                for creator in &allowed_creators {
+                for user in &allowed_users {
                     match crate::github::list_assigned_issues(
                         &client,
                         &repo_cfg.owner,
                         &repo_cfg.repo,
                         &assigned_to,
-                        creator,
+                        user,
                         &token,
                     )
                     .await
@@ -115,7 +115,7 @@ impl Trigger for GithubIssueAssignedTrigger {
                                 "GitHub API error for {}/{} (creator={}): {}",
                                 repo_cfg.owner,
                                 repo_cfg.repo,
-                                creator,
+                                user,
                                 e
                             );
                         }
@@ -151,16 +151,16 @@ mod tests {
         let toml = r#"
 type = "github_issue_assigned"
 assigned_to = "alice"
-allowed_issue_creators = ["bob", "carol"]
+allowed_user_interactions = ["bob", "carol"]
 "#;
         let config: TriggerConfig = toml::from_str(toml).unwrap();
         match config {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_issue_creators,
+                allowed_user_interactions,
             } => {
                 assert_eq!(assigned_to, "alice");
-                assert_eq!(allowed_issue_creators, vec!["bob", "carol"]);
+                assert_eq!(allowed_user_interactions, vec!["bob", "carol"]);
             }
         }
     }
@@ -169,7 +169,7 @@ allowed_issue_creators = ["bob", "carol"]
     fn build_github_issue_assigned() {
         let config = TriggerConfig::GithubIssueAssigned {
             assigned_to: "test".to_string(),
-            allowed_issue_creators: vec!["test".to_string()],
+            allowed_user_interactions: vec!["test".to_string()],
         };
         let trigger = config.build();
         assert_eq!(trigger.name(), "github_issue_assigned");

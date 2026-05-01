@@ -97,7 +97,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "carol"
-allowed_issue_creators = ["dave"]
+allowed_user_interactions = ["dave"]
 
 [[repos]]
 owner = "o"
@@ -115,10 +115,10 @@ harness = { type = "hermes", profile = "cto" }
         match &config.triggers[0] {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_issue_creators,
+                allowed_user_interactions,
             } => {
                 assert_eq!(assigned_to, "carol");
-                assert_eq!(allowed_issue_creators, &vec!["dave"]);
+                assert_eq!(allowed_user_interactions, &vec!["dave"]);
             }
         }
         // Verify step harness loaded
@@ -164,7 +164,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "test"
-allowed_issue_creators = ["test"]
+allowed_user_interactions = ["test"]
 
 [[repos]]
 owner = "o"
