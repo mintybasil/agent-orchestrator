@@ -1,8 +1,8 @@
 //! Generalized trigger system.
 //!
-//! A trigger is what initiates a workflow run. Currently only
-//! `github_issue_assigned` is supported, but the trait allows
-//! adding PR review, cron, label-based, etc. in the future.
+//! A trigger is what initiates a workflow run. Currently supports
+//! `github_issue_assigned` and `github_pr_review`, but the trait allows
+//! adding cron, label-based, etc. in the future.
 
 use crate::config::RepoConfig;
 use anyhow::Result;
@@ -28,10 +28,10 @@ pub enum TriggerConfig {
         assigned_to: String,
         allowed_user_interactions: Vec<String>,
     },
-    // Future variants:
-    // PrReview { reviewers: Vec<String> },
-    // Cron { schedule: String },
-    // IssueLabel { labels: Vec<String> },
+    /// Poll GitHub for PR reviews/comments by allowed users.
+    GithubPrReview {
+        allowed_user_interactions: Vec<String>,
+    },
 }
 
 /// Runtime trigger: produces events that initiate workflow runs.
@@ -63,6 +63,12 @@ impl TriggerConfig {
             } => Box::new(GithubIssueAssignedTrigger {
                 client: reqwest::Client::new(),
                 assigned_to: assigned_to.clone(),
+                allowed_user_interactions: allowed_user_interactions.clone(),
+            }),
+            TriggerConfig::GithubPrReview {
+                allowed_user_interactions,
+            } => Box::new(GithubPrReviewTrigger {
+                client: reqwest::Client::new(),
                 allowed_user_interactions: allowed_user_interactions.clone(),
             }),
         }
@@ -142,6 +148,75 @@ impl Trigger for GithubIssueAssignedTrigger {
     }
 }
 
+// --- GithubPrReview Trigger ---
+
+pub struct GithubPrReviewTrigger {
+    client: reqwest::Client,
+    allowed_user_interactions: Vec<String>,
+}
+
+impl Trigger for GithubPrReviewTrigger {
+    fn name(&self) -> &str {
+        "github_pr_review"
+    }
+
+    fn poll(
+        &self,
+        repos: &[RepoConfig],
+        token: &str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
+    > {
+        let allowed_users = self.allowed_user_interactions.clone();
+        let client = self.client.clone();
+        let repos: Vec<RepoConfig> = repos.to_vec();
+        let token = token.to_string();
+
+        Box::pin(async move {
+            let mut events = Vec::new();
+            for repo_cfg in &repos {
+                let mut seen_prs = std::collections::HashSet::new();
+                match crate::github::list_pr_reviews(
+                    &client,
+                    &repo_cfg.owner,
+                    &repo_cfg.repo,
+                    &token,
+                )
+                .await
+                {
+                    Err(e) => {
+                        tracing::error!(
+                            "GitHub API error for {}/{} (pr_reviews): {}",
+                            repo_cfg.owner,
+                            repo_cfg.repo,
+                            e
+                        );
+                    }
+                    Ok(reviews) => {
+                        for review in reviews {
+                            if !allowed_users.contains(&review.user) {
+                                continue;
+                            }
+                            if seen_prs.insert(review.pr_number) {
+                                events.push(TriggerEvent {
+                                    owner: repo_cfg.owner.clone(),
+                                    repo: repo_cfg.repo.clone(),
+                                    key: review.pr_number.to_string(),
+                                    label: format!(
+                                        "{}/{}#{}",
+                                        repo_cfg.owner, repo_cfg.repo, review.pr_number
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(events)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +237,9 @@ allowed_user_interactions = ["bob", "carol"]
                 assert_eq!(assigned_to, "alice");
                 assert_eq!(allowed_user_interactions, vec!["bob", "carol"]);
             }
+            TriggerConfig::GithubPrReview { .. } => {
+                panic!("expected GithubIssueAssigned, got GithubPrReview");
+            }
         }
     }
 
@@ -173,5 +251,31 @@ allowed_user_interactions = ["bob", "carol"]
         };
         let trigger = config.build();
         assert_eq!(trigger.name(), "github_issue_assigned");
+    }
+
+    #[test]
+    fn github_pr_review_deserializes() {
+        let toml = r#"
+type = "github_pr_review"
+allowed_user_interactions = ["alice", "bob"]
+"#;
+        let config: TriggerConfig = toml::from_str(toml).unwrap();
+        match config {
+            TriggerConfig::GithubPrReview {
+                allowed_user_interactions,
+            } => {
+                assert_eq!(allowed_user_interactions, vec!["alice", "bob"]);
+            }
+            _ => panic!("expected GithubPrReview variant"),
+        }
+    }
+
+    #[test]
+    fn build_github_pr_review() {
+        let config = TriggerConfig::GithubPrReview {
+            allowed_user_interactions: vec!["test".to_string()],
+        };
+        let trigger = config.build();
+        assert_eq!(trigger.name(), "github_pr_review");
     }
 }
