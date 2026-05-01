@@ -201,6 +201,10 @@ args = ["{{issue_number}}"]
 [[steps.post_hooks]]
 type = "file_non_empty"
 path = "{{output_path}}/my-step.md"
+
+# Optional: ensure committed code is pushed to the remote
+[[steps.post_hooks]]
+type = "push_code"
 ```
 
 ### Template placeholders
@@ -219,6 +223,7 @@ path = "{{output_path}}/my-step.md"
 |---|---|---|
 | `file_non_empty` | `path` (string, supports placeholders) | Fail if file is absent or zero bytes |
 | `script` | `command` (string), `args` (array of strings, support placeholders) | Spawn process; fail on non-zero exit |
+| `push_code` | _(none)_ | Push any unpushed commits to the remote; fail if no new commits exist |
 
 Hooks run in declaration order. A failure aborts the step and marks the issue as failed.
 

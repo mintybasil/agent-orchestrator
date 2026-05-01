@@ -90,20 +90,26 @@ hermes chat -p <prompt> --yolo --profile <profile> [--worktree] [--provider <pro
 Steps support optional `pre_hooks` and `post_hooks`:
 
 ```toml
-[[steps.post_hooks]]
-type = "file_non_empty"
-path = "{{output_path}}"
-
 [[steps.pre_hooks]]
 type = "script"
 command = "scripts/validate.sh"
 args = ["{{issue_number}}"]
 ```
 
-| Hook type | Fields | Effect |
-|---|---|---|
-| `file_non_empty` | `path` | Fail if file is absent or zero bytes |
-| `script` | `command`, `args` | Spawn process; fail on non-zero exit |
+```toml
+[[steps.post_hooks]]
+type = "file_non_empty"
+path = "{{output_path}}"
+
+[[steps.post_hooks]]
+type = "push_code"
+```
+
+| Hook type        | Fields            | Effect                                                                |
+|------------------|-------------------|-----------------------------------------------------------------------|
+| `file_non_empty` | `path`            | Fail if file is absent or zero bytes                                  |
+| `script`         | `command`, `args` | Spawn process; fail on non-zero exit                                  |
+| `push_code`      | N/A               | Push any unpushed commits to the remote; fail if no new commits exist |
 
 ## Running
 

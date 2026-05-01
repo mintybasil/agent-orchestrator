@@ -36,7 +36,7 @@ pub fn ensure_workspace(
 ///
 /// The env vars are scoped to this child process only — they do not leak
 /// into the parent's environment.
-fn git_command(token: &str, current_exe: &Path) -> Command {
+pub(crate) fn git_command(token: &str, current_exe: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.env(askpass::ASKPASS_MODE_ENV, "1")
         .env(askpass::GIT_TOKEN_ENV, token)
