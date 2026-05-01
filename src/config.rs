@@ -97,7 +97,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "carol"
-allowed_user_interactions = ["dave"]
+allowed_users = ["dave"]
 
 [[repos]]
 owner = "o"
@@ -115,10 +115,10 @@ harness = { type = "hermes", profile = "cto" }
         match &config.triggers[0] {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_user_interactions,
+                allowed_users,
             } => {
                 assert_eq!(assigned_to, "carol");
-                assert_eq!(allowed_user_interactions, &vec!["dave"]);
+                assert_eq!(allowed_users, &vec!["dave"]);
             }
             TriggerConfig::GithubPrReview { .. } => {
                 panic!("expected GithubIssueAssigned, got GithubPrReview");
@@ -167,7 +167,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "test"
-allowed_user_interactions = ["test"]
+allowed_users = ["test"]
 
 [[repos]]
 owner = "o"
@@ -202,11 +202,11 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "carol"
-allowed_user_interactions = ["dave"]
+allowed_users = ["dave"]
 
 [[triggers]]
 type = "github_pr_review"
-allowed_user_interactions = ["eve"]
+allowed_users = ["eve"]
 
 [[repos]]
 owner = "o"
@@ -229,9 +229,9 @@ harness = { type = "hermes", profile = "cto" }
         }
         match &config.triggers[1] {
             TriggerConfig::GithubPrReview {
-                allowed_user_interactions,
+                allowed_users,
             } => {
-                assert_eq!(allowed_user_interactions, &vec!["eve"]);
+                assert_eq!(allowed_users, &vec!["eve"]);
             }
             other => panic!("expected GithubPrReview, got {:?}", other),
         }

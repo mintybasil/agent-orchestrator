@@ -34,7 +34,7 @@ mod tests {
              [[triggers]]\n\
              type = \"github_issue_assigned\"\n\
              assigned_to = \"test\"\n\
-             allowed_user_interactions = [\"test\"]\n\n\
+             allowed_users = [\"test\"]\n\n\
              [[repos]]\n\
              owner = \"o\"\n\
              repo = \"r\"\n\n\
@@ -148,7 +148,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "test"
-allowed_user_interactions = ["test"]
+allowed_users = ["test"]
 
 [[repos]]
 owner = "o"

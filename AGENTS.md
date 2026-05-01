@@ -180,11 +180,11 @@ different config file:
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "your-github-username"
-allowed_user_interactions = ["your-github-username"]
+allowed_users = ["your-github-username"]
 
 # [[triggers]]
 # type = "github_pr_review"
-# allowed_user_interactions = ["your-github-username"]
+# allowed_users = ["your-github-username"]
 ```
 
 ### Step format

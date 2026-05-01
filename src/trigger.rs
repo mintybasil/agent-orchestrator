@@ -26,11 +26,11 @@ pub enum TriggerConfig {
     /// Poll GitHub for issues assigned to a specific user.
     GithubIssueAssigned {
         assigned_to: String,
-        allowed_user_interactions: Vec<String>,
+        allowed_users: Vec<String>,
     },
     /// Poll GitHub for PR reviews/comments by allowed users.
     GithubPrReview {
-        allowed_user_interactions: Vec<String>,
+        allowed_users: Vec<String>,
     },
 }
 
@@ -59,17 +59,17 @@ impl TriggerConfig {
         match self {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_user_interactions,
+                allowed_users,
             } => Box::new(GithubIssueAssignedTrigger {
                 client: reqwest::Client::new(),
                 assigned_to: assigned_to.clone(),
-                allowed_user_interactions: allowed_user_interactions.clone(),
+                allowed_users: allowed_users.clone(),
             }),
             TriggerConfig::GithubPrReview {
-                allowed_user_interactions,
+                allowed_users,
             } => Box::new(GithubPrReviewTrigger {
                 client: reqwest::Client::new(),
-                allowed_user_interactions: allowed_user_interactions.clone(),
+                allowed_users: allowed_users.clone(),
             }),
         }
     }
@@ -80,7 +80,7 @@ impl TriggerConfig {
 pub struct GithubIssueAssignedTrigger {
     client: reqwest::Client,
     assigned_to: String,
-    allowed_user_interactions: Vec<String>,
+    allowed_users: Vec<String>,
 }
 
 impl Trigger for GithubIssueAssignedTrigger {
@@ -96,7 +96,7 @@ impl Trigger for GithubIssueAssignedTrigger {
         Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
     > {
         let assigned_to = self.assigned_to.clone();
-        let allowed_users = self.allowed_user_interactions.clone();
+        let allowed_users = self.allowed_users.clone();
         let client = self.client.clone();
         let repos: Vec<RepoConfig> = repos.to_vec();
         let token = token.to_string();
@@ -152,7 +152,7 @@ impl Trigger for GithubIssueAssignedTrigger {
 
 pub struct GithubPrReviewTrigger {
     client: reqwest::Client,
-    allowed_user_interactions: Vec<String>,
+    allowed_users: Vec<String>,
 }
 
 impl Trigger for GithubPrReviewTrigger {
@@ -167,7 +167,7 @@ impl Trigger for GithubPrReviewTrigger {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
     > {
-        let allowed_users = self.allowed_user_interactions.clone();
+        let allowed_users = self.allowed_users.clone();
         let client = self.client.clone();
         let repos: Vec<RepoConfig> = repos.to_vec();
         let token = token.to_string();
@@ -226,16 +226,16 @@ mod tests {
         let toml = r#"
 type = "github_issue_assigned"
 assigned_to = "alice"
-allowed_user_interactions = ["bob", "carol"]
+allowed_users = ["bob", "carol"]
 "#;
         let config: TriggerConfig = toml::from_str(toml).unwrap();
         match config {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
-                allowed_user_interactions,
+                allowed_users,
             } => {
                 assert_eq!(assigned_to, "alice");
-                assert_eq!(allowed_user_interactions, vec!["bob", "carol"]);
+                assert_eq!(allowed_users, vec!["bob", "carol"]);
             }
             TriggerConfig::GithubPrReview { .. } => {
                 panic!("expected GithubIssueAssigned, got GithubPrReview");
@@ -247,7 +247,7 @@ allowed_user_interactions = ["bob", "carol"]
     fn build_github_issue_assigned() {
         let config = TriggerConfig::GithubIssueAssigned {
             assigned_to: "test".to_string(),
-            allowed_user_interactions: vec!["test".to_string()],
+            allowed_users: vec!["test".to_string()],
         };
         let trigger = config.build();
         assert_eq!(trigger.name(), "github_issue_assigned");
@@ -257,14 +257,14 @@ allowed_user_interactions = ["bob", "carol"]
     fn github_pr_review_deserializes() {
         let toml = r#"
 type = "github_pr_review"
-allowed_user_interactions = ["alice", "bob"]
+allowed_users = ["alice", "bob"]
 "#;
         let config: TriggerConfig = toml::from_str(toml).unwrap();
         match config {
             TriggerConfig::GithubPrReview {
-                allowed_user_interactions,
+                allowed_users,
             } => {
-                assert_eq!(allowed_user_interactions, vec!["alice", "bob"]);
+                assert_eq!(allowed_users, vec!["alice", "bob"]);
             }
             _ => panic!("expected GithubPrReview variant"),
         }
@@ -273,7 +273,7 @@ allowed_user_interactions = ["alice", "bob"]
     #[test]
     fn build_github_pr_review() {
         let config = TriggerConfig::GithubPrReview {
-            allowed_user_interactions: vec!["test".to_string()],
+            allowed_users: vec!["test".to_string()],
         };
         let trigger = config.build();
         assert_eq!(trigger.name(), "github_pr_review");
