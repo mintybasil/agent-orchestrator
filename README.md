@@ -91,7 +91,7 @@ Steps support optional `pre_hooks` and `post_hooks`:
 
 ```toml
 [[steps.post_hooks]]
-type = "file_non_empty"
+type = "file_not_empty"
 path = "{{output_path}}"
 
 [[steps.pre_hooks]]
@@ -102,7 +102,7 @@ args = ["{{issue_number}}"]
 
 | Hook type | Fields | Effect |
 |---|---|---|
-| `file_non_empty` | `path` | Fail if file is absent or zero bytes |
+| `file_not_empty` | `path` | Fail if file is absent or zero bytes |
 | `script` | `command`, `args` | Spawn process; fail on non-zero exit |
 
 ## Running
