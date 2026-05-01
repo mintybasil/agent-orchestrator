@@ -78,7 +78,7 @@ pub async fn run_issue(
 
         // --- Pre-hooks -----------------------------------------------------------
         for hook in &step.pre_hooks {
-            hooks::run_hook(hook, &vars, &error_path).map_err(|e| {
+            hooks::run_hook(hook, &vars, &error_path, token, current_exe).map_err(|e| {
                 tracing::error!(step = step.name, "pre-hook FAILED: {}", e);
                 e
             })?;
@@ -94,7 +94,7 @@ pub async fn run_issue(
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {
-            hooks::run_hook(hook, &vars, &error_path).map_err(|e| {
+            hooks::run_hook(hook, &vars, &error_path, token, current_exe).map_err(|e| {
                 tracing::error!(step = step.name, "post-hook FAILED: {}", e);
                 e
             })?;
