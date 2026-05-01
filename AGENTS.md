@@ -54,6 +54,7 @@ trait and are specified in config via `[[triggers]]` tables.
 
 Currently supported:
 - `github_issue_assigned` — polls GitHub for issues assigned to a user
+- `github_pr_review` — polls GitHub for PR reviews/comments by allowed users
 
 Adding a new trigger type:
 1. Add a variant to `TriggerConfig` in `src/trigger.rs`
@@ -179,7 +180,11 @@ different config file:
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "your-github-username"
-allowed_issue_creators = ["your-github-username"]
+allowed_user_interactions = ["your-github-username"]
+
+# [[triggers]]
+# type = "github_pr_review"
+# allowed_user_interactions = ["your-github-username"]
 ```
 
 ### Step format
