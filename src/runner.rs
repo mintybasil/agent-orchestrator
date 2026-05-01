@@ -1,5 +1,5 @@
 use crate::git;
-use crate::hermes::invoke;
+use crate::hermes::{InvokeArgs, invoke};
 use crate::template::render;
 use crate::workflow::{Hook, Step};
 use anyhow::Result;
@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use tracing::info_span;
 
 /// Identifies a GitHub issue uniquely.
 pub struct IssueKey {
@@ -47,7 +48,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
         Hook::Script { command, args } => {
             let resolved_args: Vec<String> = args.iter().map(|a| render(a, vars)).collect();
 
-            tracing::info!("[hook Script] {} {}", command, resolved_args.join(" "));
+            tracing::info!(command, args = resolved_args.join(" "), "running hook");
 
             let mut child = Command::new(command)
                 .args(&resolved_args)
@@ -64,7 +65,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
                 if let Some(stderr) = stderr_stream {
                     let reader = BufReader::new(stderr);
                     for line in reader.lines().map_while(Result::ok) {
-                        tracing::error!("[hook stderr] {}", line);
+                        tracing::error!(stderr = true, "{}", line);
                     }
                 }
             });
@@ -72,7 +73,7 @@ fn run_hook(hook: &Hook, vars: &HashMap<&str, String>, error_path: &Path) -> Res
             if let Some(stdout) = child.stdout.take() {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines().map_while(Result::ok) {
-                    tracing::info!("[hook stdout] {}", line);
+                    tracing::info!("{}", line);
                 }
             }
 
@@ -135,50 +136,56 @@ pub async fn run_issue(
             .map(|(k, v)| (k.as_str(), v.clone()))
             .collect();
 
+        // Create a span for the entire step iteration — pre-hooks, hermes,
+        // post-hooks, and all their log output inherit this context.
+        let span = info_span!(
+            "step",
+            profile = %step.profile,
+            issue = %key,
+            step_name = %step.name,
+        );
+        let _enter = span.enter();
+
         // --- Pre-hooks -----------------------------------------------------------
         for hook in &step.pre_hooks {
             run_hook(hook, &vars, &error_path).map_err(|e| {
-                tracing::error!("[{}] {}: pre-hook FAILED: {}", key, step.name, e);
+                tracing::error!(step = step.name, "pre-hook FAILED: {}", e);
                 e
             })?;
         }
 
-        tracing::info!("[{}] {}: started", key, step.name);
+        tracing::info!("started");
 
         // hermes::invoke is sync; run it in a blocking thread pool.
-        let prompt = render(&step.prompt_template, &vars);
-        let profile = step.profile.clone();
-        let worktree = step.worktree;
-        let provider = step.provider.clone();
-        let model = step.model.clone();
-        let error_path_clone = error_path.clone();
+        let hermes_args = InvokeArgs {
+            prompt: render(&step.prompt_template, &vars),
+            profile: step.profile.clone(),
+            worktree: step.worktree,
+            provider: step.provider.clone(),
+            model: step.model.clone(),
+            error_file: error_path.clone(),
+            work_dir: Some(workspace_dir.clone()),
+        };
 
-        // Run hermes from the workspace directory (git clone of the repo).
-        let workspace_dir_clone = workspace_dir.clone();
-
-        tokio::task::spawn_blocking(move || {
-            invoke(
-                &prompt,
-                &profile,
-                worktree,
-                provider.as_deref(),
-                model.as_deref(),
-                &error_path_clone,
-                Some(&workspace_dir_clone),
-            )
+        // Clone the span so that spawn_blocking carries it into the new thread.
+        let hermes_span = span.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let _enter = hermes_span.enter();
+            invoke(&hermes_args)
         })
         .await
-        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))??;
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))?;
+        result?;
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {
             run_hook(hook, &vars, &error_path).map_err(|e| {
-                tracing::error!("[{}] {}: post-hook FAILED: {}", key, step.name, e);
+                tracing::error!(step = step.name, "post-hook FAILED: {}", e);
                 e
             })?;
         }
 
-        tracing::info!("[{}] {}: completed", key, step.name);
+        tracing::info!("completed");
     }
 
     Ok(())
