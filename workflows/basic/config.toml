@@ -13,6 +13,10 @@ repo = "bento-hancho"
 owner = "zerokrab"
 repo = "bento-bench"
 
+[[repos]]
+owner = "mintybasil"
+repo = "agent-orchestrator"
+
 # Workflow steps executed sequentially for each assigned issue.
 # Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
 
