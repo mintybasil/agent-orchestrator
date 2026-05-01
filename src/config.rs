@@ -148,7 +148,10 @@ harness = { type = "hermes", profile = "cto" }
         f.write_all(toml.as_bytes()).unwrap();
         let err = Config::load(f.path()).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("trigger"), "expected 'trigger' in error: {msg}");
+        assert!(
+            msg.contains("trigger"),
+            "expected 'trigger' in error: {msg}"
+        );
     }
 
     #[test]
