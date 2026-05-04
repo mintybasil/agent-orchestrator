@@ -72,7 +72,7 @@ profile = "cto"
 Each step runs:
 
 ```
-hermes chat -p <prompt> --yolo --profile <profile> [--worktree] [--provider <provider>] [--model <model>]
+hermes chat -p <prompt> --yolo --quiet --profile <profile> [--worktree] [--provider <provider>] [--model <model>]
 ```
 
 ### Template placeholders

@@ -155,6 +155,7 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 |---|---|---|
 | `-p <prompt>` | Rendered `prompt_template` | always |
 | `--yolo` | hardcoded | always |
+| `--quiet` | hardcoded | always |
 | `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
 | `--worktree` | `worktree = true` in HarnessConfig::Hermes | optional |
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
