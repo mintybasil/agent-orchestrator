@@ -45,6 +45,13 @@ pub fn run(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Tests that modify `AO_GIT_TOKEN` must not run concurrently because
+    /// `std::env::set_var` / `remove_var` operate on the process-wide
+    /// environment. This mutex serialises all askpass tests without
+    /// penalising the rest of the test suite.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     fn set_token(val: &str) {
         unsafe {
@@ -60,6 +67,7 @@ mod tests {
 
     #[test]
     fn askpass_returns_username_for_username_prompt() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         set_token("ghp_test123");
         let exit_code = run(&[
             "agent-orchestrator".into(),
@@ -71,6 +79,7 @@ mod tests {
 
     #[test]
     fn askpass_returns_token_for_password_prompt() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         set_token("ghp_test123");
         let exit_code = run(&[
             "agent-orchestrator".into(),
@@ -82,6 +91,7 @@ mod tests {
 
     #[test]
     fn askpass_returns_token_for_generic_prompt() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         set_token("ghp_test123");
         let exit_code = run(&[
             "agent-orchestrator".into(),
@@ -93,6 +103,7 @@ mod tests {
 
     #[test]
     fn askpass_fails_without_token() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         remove_token();
         let exit_code = run(&[
             "agent-orchestrator".into(),
@@ -103,6 +114,7 @@ mod tests {
 
     #[test]
     fn askpass_fails_with_empty_token() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         set_token("");
         let exit_code = run(&[
             "agent-orchestrator".into(),
