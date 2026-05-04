@@ -8,26 +8,29 @@ use std::fs;
 use std::path::Path;
 use tracing::info_span;
 
-/// Identifies a GitHub issue uniquely.
-pub struct IssueKey {
+/// Identifies a trigger event uniquely (issue, PR review, etc.).
+pub struct EventKey {
     pub owner: String,
     pub repo: String,
+    /// Opaque numeric identifier (issue number, PR number, etc.).
     pub number: u64,
+    /// Trigger-specific template variables carried from the TriggerEvent.
+    pub variables: HashMap<String, String>,
 }
 
-impl std::fmt::Display for IssueKey {
+impl std::fmt::Display for EventKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}#{}", self.owner, self.repo, self.number)
     }
 }
 
-/// Run all workflow steps for a single issue.
+/// Run all workflow steps for a single trigger event.
 /// Returns Ok(()) if all steps succeeded, Err if any step failed.
 /// data_root is the base data/ directory (e.g. PathBuf::from("data")).
 /// token is the GitHub token used for authenticating git operations.
 /// current_exe is the path to this binary, used as GIT_ASKPASS helper.
-pub async fn run_issue(
-    key: &IssueKey,
+pub async fn run_event(
+    key: &EventKey,
     data_root: &Path,
     steps: &[Step],
     token: &str,
@@ -46,24 +49,21 @@ pub async fn run_issue(
     for (idx, step) in steps.iter().enumerate() {
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
 
-        // Build template variables.
-        let var_pairs: Vec<(String, String)> = vec![
-            ("owner".to_string(), key.owner.clone()),
-            ("repo".to_string(), key.repo.clone()),
-            ("issue_number".to_string(), key.number.to_string()),
-            (
-                "output_path".to_string(),
-                issue_dir.to_string_lossy().into_owned(),
-            ),
-            (
-                "workspace".to_string(),
-                workspace_dir.to_string_lossy().into_owned(),
-            ),
-        ];
-        let vars: HashMap<&str, String> = var_pairs
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.clone()))
-            .collect();
+        // Build global template variables.
+        let mut vars: HashMap<&str, String> = [
+            ("owner", key.owner.clone()),
+            ("repo", key.repo.clone()),
+            ("output_path", issue_dir.to_string_lossy().into_owned()),
+            ("workspace", workspace_dir.to_string_lossy().into_owned()),
+        ]
+        .into_iter()
+        .collect();
+
+        // Merge trigger-specific variables (e.g. issue_number, pr_number).
+        // Trigger variables use owned Strings; we borrow them as &str.
+        for (k, v) in &key.variables {
+            vars.insert(k.as_str(), v.clone());
+        }
 
         // Create a span for the entire step iteration — pre-hooks, agent,
         // post-hooks, and all their log output inherit this context.
