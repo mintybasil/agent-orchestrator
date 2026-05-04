@@ -42,7 +42,7 @@ pub async fn run_poll_loop(
         ticker.tick().await;
 
         for trigger in &triggers {
-            tracing::info!(
+            tracing::debug!(
                 "poll tick: trigger={}, checking {} repos",
                 trigger.name(),
                 repos.len()
