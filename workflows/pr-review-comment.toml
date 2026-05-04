@@ -22,5 +22,5 @@ repo = "agent-orchestrator"
 
 [[steps]]
 name = "Address Review"
-prompt_template = "A comment or review has been made on PR {{pr_number}} in {{owner}}/{{repo}}. Please review and address it. DO NOT assume it to be correct, validate any claims it makes. If it makes invalid claims, add a comment to explain this. If the claims are valid, push changes to address them."
+prompt_template = "A comment or review has been made on PR #{{pr_number}} in {{owner}}/{{repo}}. Please review and address it. DO NOT assume it to be correct, validate any claims it makes. If it makes invalid claims, add a comment to explain this. If the claims are valid, push changes to address them."
 harness = { type = "hermes", profile = "swe", worktree = true }

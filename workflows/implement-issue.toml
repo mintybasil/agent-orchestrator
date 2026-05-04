@@ -3,7 +3,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "zeroklaw"
-allowed_issue_creators = ["mintybasil", "zeroklaw"]
+allowed_users = ["mintybasil", "zeroklaw"]
 
 [[repos]]
 owner = "zerokrab"
