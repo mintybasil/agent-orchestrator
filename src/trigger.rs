@@ -181,7 +181,7 @@ impl Trigger for GithubPrReviewTrigger {
         Box::pin(async move {
             let mut events = Vec::new();
             for repo_cfg in &repos {
-                let mut seen_prs = std::collections::HashSet::new();
+                let mut seen_reviews = std::collections::HashSet::new();
                 match crate::github::list_pr_reviews(
                     &client,
                     &repo_cfg.owner,
@@ -203,16 +203,16 @@ impl Trigger for GithubPrReviewTrigger {
                             if !allowed_users.contains(&review.user) {
                                 continue;
                             }
-                            if seen_prs.insert(review.pr_number) {
+                            if seen_reviews.insert(review.id) {
                                 let mut vars = std::collections::HashMap::new();
                                 vars.insert("pr_number".to_string(), review.pr_number.to_string());
                                 events.push(TriggerEvent {
                                     owner: repo_cfg.owner.clone(),
                                     repo: repo_cfg.repo.clone(),
-                                    key: review.pr_number.to_string(),
+                                    key: review.id.to_string(),
                                     label: format!(
-                                        "{}/{}#{}",
-                                        repo_cfg.owner, repo_cfg.repo, review.pr_number
+                                        "{}/{}#review_{}",
+                                        repo_cfg.owner, repo_cfg.repo, review.id
                                     ),
                                     variables: vars,
                                 });
@@ -307,8 +307,8 @@ allowed_users = ["alice", "bob"]
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),
-            key: "99".to_string(),
-            label: "acme/project#99".to_string(),
+            key: "1234567".to_string(),
+            label: "acme/project#review_1234567".to_string(),
             variables: vars,
         };
         assert_eq!(event.variables.get("pr_number"), Some(&"99".to_string()));

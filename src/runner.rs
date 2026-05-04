@@ -12,7 +12,7 @@ use tracing::info_span;
 pub struct EventKey {
     pub owner: String,
     pub repo: String,
-    /// Opaque numeric identifier (issue number, PR number, etc.).
+    /// Opaque numeric identifier (issue number, review ID, etc.).
     pub number: u64,
     /// Trigger-specific template variables carried from the TriggerEvent.
     pub variables: HashMap<String, String>,
