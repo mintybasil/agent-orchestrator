@@ -17,6 +17,10 @@ pub struct TriggerEvent {
     /// Human-readable label for logging.
     #[allow(dead_code)]
     pub label: String,
+    /// Trigger-specific template variables (e.g. "issue_number" for issues,
+    /// "pr_number" for PR reviews). These are merged with global variables
+    /// (owner, repo, output_path, workspace) in the runner.
+    pub variables: std::collections::HashMap<String, String>,
 }
 
 /// Config-side trigger definition deserialized from TOML.
@@ -124,6 +128,8 @@ impl Trigger for GithubIssueAssignedTrigger {
                         Ok(page) => {
                             for issue in page {
                                 if seen_numbers.insert(issue.number) {
+                                    let mut vars = std::collections::HashMap::new();
+                                    vars.insert("issue_number".to_string(), issue.number.to_string());
                                     events.push(TriggerEvent {
                                         owner: repo_cfg.owner.clone(),
                                         repo: repo_cfg.repo.clone(),
@@ -132,6 +138,7 @@ impl Trigger for GithubIssueAssignedTrigger {
                                             "{}/{}#{}",
                                             repo_cfg.owner, repo_cfg.repo, issue.number
                                         ),
+                                        variables: vars,
                                     });
                                 }
                             }
@@ -194,6 +201,8 @@ impl Trigger for GithubPrReviewTrigger {
                                 continue;
                             }
                             if seen_prs.insert(review.pr_number) {
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("pr_number".to_string(), review.pr_number.to_string());
                                 events.push(TriggerEvent {
                                     owner: repo_cfg.owner.clone(),
                                     repo: repo_cfg.repo.clone(),
@@ -202,6 +211,7 @@ impl Trigger for GithubPrReviewTrigger {
                                         "{}/{}#{}",
                                         repo_cfg.owner, repo_cfg.repo, review.pr_number
                                     ),
+                                    variables: vars,
                                 });
                             }
                         }
@@ -271,5 +281,37 @@ allowed_users = ["alice", "bob"]
         };
         let trigger = config.build();
         assert_eq!(trigger.name(), "github_pr_review");
+    }
+
+    #[test]
+    fn trigger_event_issue_carries_issue_number_variable() {
+        let vars = std::collections::HashMap::from([
+            ("issue_number".to_string(), "42".to_string()),
+        ]);
+        let event = TriggerEvent {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            key: "42".to_string(),
+            label: "acme/project#42".to_string(),
+            variables: vars,
+        };
+        assert_eq!(event.variables.get("issue_number"), Some(&"42".to_string()));
+        assert_eq!(event.variables.get("pr_number"), None);
+    }
+
+    #[test]
+    fn trigger_event_pr_carries_pr_number_variable() {
+        let vars = std::collections::HashMap::from([
+            ("pr_number".to_string(), "99".to_string()),
+        ]);
+        let event = TriggerEvent {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            key: "99".to_string(),
+            label: "acme/project#99".to_string(),
+            variables: vars,
+        };
+        assert_eq!(event.variables.get("pr_number"), Some(&"99".to_string()));
+        assert_eq!(event.variables.get("issue_number"), None);
     }
 }
