@@ -41,7 +41,7 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         cmd.current_dir(dir);
     }
     cmd.arg("chat")
-        .arg("-p")
+        .arg("-q")
         .arg(&args.prompt)
         .arg("--yolo")
         .arg("--quiet")

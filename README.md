@@ -98,7 +98,7 @@ args = ["{{issue_number}}"]
 
 ```toml
 [[steps.post_hooks]]
-type = "file_non_empty"
+type = "file_not_empty"
 path = "{{output_path}}"
 
 [[steps.post_hooks]]
@@ -107,7 +107,7 @@ type = "push_code"
 
 | Hook type        | Fields            | Effect                                                                |
 |------------------|-------------------|-----------------------------------------------------------------------|
-| `file_non_empty` | `path`            | Fail if file is absent or zero bytes                                  |
+| `file_not_empty` | `path`            | Fail if file is absent or zero bytes                                  |
 | `script`         | `command`, `args` | Spawn process; fail on non-zero exit                                  |
 | `push_code`      | N/A               | Push any unpushed commits to the remote; fail if no new commits exist |
 

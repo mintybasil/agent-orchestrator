@@ -49,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn file_non_empty_hook_deserializes() {
+    fn file_not_empty_hook_deserializes() {
         let steps = r#"
 [[steps]]
 name = "triage"
@@ -57,7 +57,7 @@ prompt_template = "Do triage for {{owner}}/{{repo}}. Output: {{output_path}}."
 harness = { type = "hermes", profile = "test" }
 
 [[steps.post_hooks]]
-type = "file_non_empty"
+type = "file_not_empty"
 path = "{{output_path}}"
 "#;
         let config = parse_config(steps).unwrap();
@@ -66,7 +66,7 @@ path = "{{output_path}}"
         assert_eq!(config.steps[0].post_hooks.len(), 1);
         assert!(matches!(
             config.steps[0].post_hooks[0],
-            crate::hooks::Hook::FileNonEmpty { .. }
+            crate::hooks::Hook::FileNotEmpty { .. }
         ));
     }
 
