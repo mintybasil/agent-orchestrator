@@ -99,9 +99,8 @@ mod tests {
         .collect();
 
         // Merge trigger-specific variables (simulating a PR trigger)
-        let trigger_vars = std::collections::HashMap::from([
-            ("pr_number".to_string(), "7".to_string()),
-        ]);
+        let trigger_vars =
+            std::collections::HashMap::from([("pr_number".to_string(), "7".to_string())]);
         for (k, v) in &trigger_vars {
             vars.insert(k.as_str(), v.clone());
         }

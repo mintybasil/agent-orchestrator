@@ -129,7 +129,10 @@ impl Trigger for GithubIssueAssignedTrigger {
                             for issue in page {
                                 if seen_numbers.insert(issue.number) {
                                     let mut vars = std::collections::HashMap::new();
-                                    vars.insert("issue_number".to_string(), issue.number.to_string());
+                                    vars.insert(
+                                        "issue_number".to_string(),
+                                        issue.number.to_string(),
+                                    );
                                     events.push(TriggerEvent {
                                         owner: repo_cfg.owner.clone(),
                                         repo: repo_cfg.repo.clone(),
@@ -285,9 +288,8 @@ allowed_users = ["alice", "bob"]
 
     #[test]
     fn trigger_event_issue_carries_issue_number_variable() {
-        let vars = std::collections::HashMap::from([
-            ("issue_number".to_string(), "42".to_string()),
-        ]);
+        let vars =
+            std::collections::HashMap::from([("issue_number".to_string(), "42".to_string())]);
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),
@@ -301,9 +303,7 @@ allowed_users = ["alice", "bob"]
 
     #[test]
     fn trigger_event_pr_carries_pr_number_variable() {
-        let vars = std::collections::HashMap::from([
-            ("pr_number".to_string(), "99".to_string()),
-        ]);
+        let vars = std::collections::HashMap::from([("pr_number".to_string(), "99".to_string())]);
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),

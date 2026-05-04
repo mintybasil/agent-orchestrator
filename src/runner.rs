@@ -53,14 +53,8 @@ pub async fn run_event(
         let mut vars: HashMap<&str, String> = [
             ("owner", key.owner.clone()),
             ("repo", key.repo.clone()),
-            (
-                "output_path",
-                issue_dir.to_string_lossy().into_owned(),
-            ),
-            (
-                "workspace",
-                workspace_dir.to_string_lossy().into_owned(),
-            ),
+            ("output_path", issue_dir.to_string_lossy().into_owned()),
+            ("workspace", workspace_dir.to_string_lossy().into_owned()),
         ]
         .into_iter()
         .collect();
