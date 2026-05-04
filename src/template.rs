@@ -74,4 +74,44 @@ mod tests {
         let result = render("Work in {{workspace}} for this issue.", &vars);
         assert_eq!(result, "Work in /data/owner/repo/workspace for this issue.");
     }
+
+    #[test]
+    fn pr_number_substitution() {
+        let mut vars = HashMap::new();
+        vars.insert("pr_number", "123".to_string());
+        vars.insert("owner", "acme".to_string());
+        vars.insert("repo", "project".to_string());
+        let result = render("Review PR #{{pr_number}} in {{owner}}/{{repo}}.", &vars);
+        assert_eq!(result, "Review PR #123 in acme/project.");
+    }
+
+    #[test]
+    fn trigger_specific_vars_merge_with_globals() {
+        // Simulates the merging logic from runner::run_event:
+        // global vars (owner, repo, output_path, workspace) + trigger vars
+        let mut vars: HashMap<&str, String> = [
+            ("owner", "acme".to_string()),
+            ("repo", "project".to_string()),
+            ("output_path", "/data/acme/project/42".to_string()),
+            ("workspace", "/data/acme/project/workspace".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        // Merge trigger-specific variables (simulating a PR trigger)
+        let trigger_vars =
+            std::collections::HashMap::from([("pr_number".to_string(), "7".to_string())]);
+        for (k, v) in &trigger_vars {
+            vars.insert(k.as_str(), v.clone());
+        }
+
+        let result = render(
+            "Review PR #{{pr_number}} in {{owner}}/{{repo}}. Write to {{output_path}}.",
+            &vars,
+        );
+        assert_eq!(
+            result,
+            "Review PR #7 in acme/project. Write to /data/acme/project/42."
+        );
+    }
 }

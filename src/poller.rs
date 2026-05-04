@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, interval};
 
 use crate::config::Config;
-use crate::runner::{IssueKey, run_issue};
+use crate::runner::{EventKey, run_event};
 use crate::trigger::Trigger;
 use crate::workflow;
 
@@ -69,10 +69,11 @@ pub async fn run_poll_loop(
                     }
                 };
 
-                let issue_key = IssueKey {
+                let event_key = EventKey {
                     owner: event.owner.clone(),
                     repo: event.repo.clone(),
                     number: issue_number,
+                    variables: event.variables.clone(),
                 };
 
                 // Skip if completed
@@ -105,7 +106,7 @@ pub async fn run_poll_loop(
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(key_str.clone());
-                tracing::info!("[{}] dispatching workflow", issue_key);
+                tracing::info!("[{}] dispatching workflow", event_key);
 
                 let completed_clone = Arc::clone(&completed);
                 let in_flight_clone = Arc::clone(&in_flight);
@@ -120,8 +121,8 @@ pub async fn run_poll_loop(
                 let steps_clone = Arc::clone(&workflow_steps);
 
                 tokio::spawn(async move {
-                    let result = run_issue(
-                        &issue_key,
+                    let result = run_event(
+                        &event_key,
                         &data_root_clone,
                         &steps_clone,
                         &token_clone,
@@ -135,7 +136,7 @@ pub async fn run_poll_loop(
 
                     match result {
                         Ok(()) => {
-                            tracing::info!("[{}] workflow completed", issue_key);
+                            tracing::info!("[{}] workflow completed", event_key);
                             // Add to completed set and persist
                             completed_clone
                                 .lock()
@@ -144,7 +145,7 @@ pub async fn run_poll_loop(
                             append_completed(&completed_path, &key_str_clone, &file_lock_clone);
                         }
                         Err(e) => {
-                            tracing::error!("[{}] workflow FAILED: {}", issue_key, e);
+                            tracing::error!("[{}] workflow FAILED: {}", event_key, e);
                             // Prevent re-dispatch within this daemon run (in-memory only)
                             permanently_failed_clone
                                 .lock()
