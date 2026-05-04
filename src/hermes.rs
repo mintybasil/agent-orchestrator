@@ -89,7 +89,9 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
                         cap.push_str(&l);
                         cap.push('\n');
                     }
-                    Err(e) => tracing::warn!(issue = %stderr_issue, step = %stderr_step, "stderr read error: {}", e),
+                    Err(e) => {
+                        tracing::warn!(issue = %stderr_issue, step = %stderr_step, "stderr read error: {}", e)
+                    }
                 }
             }
         }
@@ -101,7 +103,9 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         for line in reader.lines() {
             match line {
                 Ok(l) => tracing::info!(issue = %args.issue, step = %args.step, "{}", l),
-                Err(e) => tracing::warn!(issue = %args.issue, step = %args.step, "stdout read error: {}", e),
+                Err(e) => {
+                    tracing::warn!(issue = %args.issue, step = %args.step, "stdout read error: {}", e)
+                }
             }
         }
     }

@@ -89,7 +89,13 @@ pub async fn run_issue(
         // Run the harness.
         let rendered_prompt = render(&step.prompt_template, &vars);
         harness
-            .run_step(step, &workspace_dir, &rendered_prompt, &error_path, &key.to_string())
+            .run_step(
+                step,
+                &workspace_dir,
+                &rendered_prompt,
+                &error_path,
+                &key.to_string(),
+            )
             .await?;
 
         // --- Post-hooks ----------------------------------------------------------
