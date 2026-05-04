@@ -179,7 +179,7 @@ prompt_template = "do thing"
 harness = { type = "hermes", profile = "cto" }
 
 [[steps.post_hooks]]
-type = "file_not_empty"
+type = "file_is_whale"
 path = "{{output_path}}"
 "#;
         let mut f = tempfile::NamedTempFile::new().unwrap();
