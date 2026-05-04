@@ -19,19 +19,19 @@ pub struct InvokeArgs {
     pub model: Option<String>,
     pub error_file: PathBuf,
     pub work_dir: Option<PathBuf>,
+    pub issue: String,
+    pub step: String,
 }
 
 /// Invoke `hermes chat` with the given arguments.
 ///
-/// Always passes `--yolo`. If `work_dir` is provided, hermes runs from that
-/// directory (which becomes its project root).
+/// Always passes `--yolo` and `--quiet`. If `work_dir` is provided, hermes
+/// runs from that directory (which becomes its project root).
 ///
-/// The caller should set up a `tracing::info_span!` with context fields
-/// (profile, issue, step) before calling this function. All stdout/stderr
-/// events emitted here will be annotated with that span automatically.
-///
-/// The current span is propagated to the stderr drain thread via
-/// `Span::current()` so that concurrent stderr output is also annotated.
+/// Log lines include explicit `issue` and `step` fields from `InvokeArgs`,
+/// ensuring context is visible regardless of tracing formatter configuration.
+/// The current span is also propagated to the stderr drain thread via
+/// `Span::current()`.
 ///
 /// Returns `Ok(())` on exit code 0.
 /// On non-zero exit: writes captured stderr to `error_file` and returns `Err`.
@@ -44,6 +44,7 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         .arg("-q")
         .arg(&args.prompt)
         .arg("--yolo")
+        .arg("--quiet")
         .arg("--profile")
         .arg(&args.profile);
     if args.worktree {
@@ -67,6 +68,10 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
     // concurrent stderr output carries the same span context as stdout.
     let parent_span = Span::current();
 
+    // Clone context strings for the stderr drain thread (which is a `move` closure).
+    let stderr_issue = args.issue.clone();
+    let stderr_step = args.step.clone();
+
     // Drain stderr on a dedicated thread (concurrent with stdout drain)
     let stderr_stream = child.stderr.take();
     let stderr_capture_clone = Arc::clone(&stderr_capture);
@@ -77,14 +82,16 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
             for line in reader.lines() {
                 match line {
                     Ok(l) => {
-                        tracing::error!(stderr = true, "{}", l);
+                        tracing::error!(issue = %stderr_issue, step = %stderr_step, "{}", l);
                         let mut cap = stderr_capture_clone
                             .lock()
                             .unwrap_or_else(|e| e.into_inner());
                         cap.push_str(&l);
                         cap.push('\n');
                     }
-                    Err(e) => tracing::warn!(stderr = true, "read error: {}", e),
+                    Err(e) => {
+                        tracing::warn!(issue = %stderr_issue, step = %stderr_step, "stderr read error: {}", e)
+                    }
                 }
             }
         }
@@ -95,8 +102,10 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             match line {
-                Ok(l) => tracing::info!("{}", l),
-                Err(e) => tracing::warn!("stdout read error: {}", e),
+                Ok(l) => tracing::info!(issue = %args.issue, step = %args.step, "{}", l),
+                Err(e) => {
+                    tracing::warn!(issue = %args.issue, step = %args.step, "stdout read error: {}", e)
+                }
             }
         }
     }
@@ -138,10 +147,11 @@ impl Harness for HermesHarness {
 
     fn run_step(
         &self,
-        _step: &Step,
+        step: &Step,
         workspace_dir: &Path,
         rendered_prompt: &str,
         error_path: &Path,
+        issue: &str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
         let args = InvokeArgs {
             prompt: rendered_prompt.to_string(),
@@ -151,6 +161,8 @@ impl Harness for HermesHarness {
             model: self.model.clone(),
             error_file: error_path.to_path_buf(),
             work_dir: Some(workspace_dir.to_path_buf()),
+            issue: issue.to_string(),
+            step: step.name.clone(),
         };
 
         Box::pin(async move { tokio::task::spawn_blocking(move || invoke(&args)).await? })

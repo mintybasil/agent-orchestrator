@@ -78,7 +78,7 @@ pub async fn run_issue(
 
         // --- Pre-hooks -----------------------------------------------------------
         for hook in &step.pre_hooks {
-            hooks::run_hook(hook, &vars, &error_path).map_err(|e| {
+            hooks::run_hook(hook, &vars, &error_path, token, current_exe).map_err(|e| {
                 tracing::error!(step = step.name, "pre-hook FAILED: {}", e);
                 e
             })?;
@@ -89,12 +89,18 @@ pub async fn run_issue(
         // Run the harness.
         let rendered_prompt = render(&step.prompt_template, &vars);
         harness
-            .run_step(step, &workspace_dir, &rendered_prompt, &error_path)
+            .run_step(
+                step,
+                &workspace_dir,
+                &rendered_prompt,
+                &error_path,
+                &key.to_string(),
+            )
             .await?;
 
         // --- Post-hooks ----------------------------------------------------------
         for hook in &step.post_hooks {
-            hooks::run_hook(hook, &vars, &error_path).map_err(|e| {
+            hooks::run_hook(hook, &vars, &error_path, token, current_exe).map_err(|e| {
                 tracing::error!(step = step.name, "post-hook FAILED: {}", e);
                 e
             })?;

@@ -34,7 +34,7 @@ mod tests {
              [[triggers]]\n\
              type = \"github_issue_assigned\"\n\
              assigned_to = \"test\"\n\
-             allowed_issue_creators = [\"test\"]\n\n\
+             allowed_users = [\"test\"]\n\n\
              [[repos]]\n\
              owner = \"o\"\n\
              repo = \"r\"\n\n\
@@ -95,6 +95,25 @@ args = ["clippy"]
     }
 
     #[test]
+    fn push_code_hook_deserializes() {
+        let steps = r#"
+[[steps]]
+name = "triage"
+prompt_template = "Do triage."
+harness = { type = "hermes", profile = "test" }
+
+[[steps.post_hooks]]
+type = "push_code"
+"#;
+        let config = parse_config(steps).unwrap();
+        assert_eq!(config.steps.len(), 1);
+        assert!(matches!(
+            config.steps[0].post_hooks[0],
+            crate::hooks::Hook::PushCode
+        ));
+    }
+
+    #[test]
     fn step_hermes_harness_with_profile() {
         let steps = r#"
 [[steps]]
@@ -129,7 +148,7 @@ poll_interval_secs = 60
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "test"
-allowed_issue_creators = ["test"]
+allowed_users = ["test"]
 
 [[repos]]
 owner = "o"

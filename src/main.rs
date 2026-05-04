@@ -1,5 +1,18 @@
 use crate::config::Cli;
+use chrono::Local;
 use clap::Parser;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::time::FormatTime;
+
+/// Custom timer for short timestamps in log output: `HH:MM:SS`
+/// instead of the default RFC 3339 with nanoseconds.
+struct ShortTime;
+
+impl FormatTime for ShortTime {
+    fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", Local::now().format("%H:%M:%S"))
+    }
+}
 
 mod askpass;
 mod config;
@@ -41,8 +54,10 @@ async fn main() {
     // Use the compact formatter so span fields (profile, issue, step_name)
     // appear on every event line, making it easy to tell which issue
     // produced each log line when multiple run concurrently.
+    // Short timestamps: HH:MM:SS instead of full RFC 3339 with nanoseconds.
     tracing_subscriber::fmt()
         .compact()
+        .with_timer(ShortTime)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),

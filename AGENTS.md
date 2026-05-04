@@ -54,6 +54,7 @@ trait and are specified in config via `[[triggers]]` tables.
 
 Currently supported:
 - `github_issue_assigned` — polls GitHub for issues assigned to a user
+- `github_pr_review` — polls GitHub for PR reviews/comments by allowed users
 
 Adding a new trigger type:
 1. Add a variant to `TriggerConfig` in `src/trigger.rs`
@@ -154,6 +155,7 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 |---|---|---|
 | `-p <prompt>` | Rendered `prompt_template` | always |
 | `--yolo` | hardcoded | always |
+| `--quiet` | hardcoded | always |
 | `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
 | `--worktree` | `worktree = true` in HarnessConfig::Hermes | optional |
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
@@ -179,7 +181,11 @@ different config file:
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "your-github-username"
-allowed_issue_creators = ["your-github-username"]
+allowed_users = ["your-github-username"]
+
+# [[triggers]]
+# type = "github_pr_review"
+# allowed_users = ["your-github-username"]
 ```
 
 ### Step format
@@ -201,6 +207,10 @@ args = ["{{issue_number}}"]
 [[steps.post_hooks]]
 type = "file_not_empty"
 path = "{{output_path}}/my-step.md"
+
+# Optional: ensure committed code is pushed to the remote
+[[steps.post_hooks]]
+type = "push_code"
 ```
 
 ### Template placeholders
@@ -219,6 +229,7 @@ path = "{{output_path}}/my-step.md"
 |---|---|---|
 | `file_not_empty` | `path` (string, supports placeholders) | Fail if file is absent or zero bytes |
 | `script` | `command` (string), `args` (array of strings, support placeholders) | Spawn process; fail on non-zero exit |
+| `push_code` | _(none)_ | Push any unpushed commits to the remote; fail if no new commits exist |
 
 Hooks run in declaration order. A failure aborts the step and marks the issue as failed.
 
