@@ -212,7 +212,7 @@ async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
     Ok(())
 }
 
-#[instrument(skip_all, fields(step=step.name, key = ctx.key, step=step.name), parent = None)]
+#[instrument(skip_all, fields(step=step.name, key = ctx.key), parent = None)]
 async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------

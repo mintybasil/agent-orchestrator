@@ -1,24 +1,20 @@
 poll_interval_secs = 60
 
+repos = [
+    {owner = "zerokrab", repo = "bento-hancho"},
+    {owner = "zerokrab", repo = "bento-bench"},
+    {owner = "zerokrab", repo = "boundless-profit-explorer"},
+    {owner = "mintybasil", repo = "agent-orchestrator"},
+]
+
+[git]
+clone = true
+worktree = true
+default_branch = "main"
+
 [[triggers]]
 type = "github_pr_review"
 allowed_users = ["mintybasil"]
-
-[[repos]]
-owner = "zerokrab"
-repo = "bento-hancho"
-
-[[repos]]
-owner = "zerokrab"
-repo = "bento-bench"
-
-[[repos]]
-owner = "zerokrab"
-repo = "boundless-profit-explorer"
-
-[[repos]]
-owner = "mintybasil"
-repo = "agent-orchestrator"
 
 [[steps]]
 name = "Address Review"

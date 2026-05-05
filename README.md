@@ -34,27 +34,7 @@ The binary is at `target/release/agent-orchestrator`.
 
 ## Configuration
 
-Copy `config.example.toml` to `config.toml` and edit it:
-
-```toml
-poll_interval_secs = 60
-assigned_to = "your-github-username"
-allowed_issue_creators = ["your-github-username"]
-
-[[repos]]
-owner = "your-org"
-repo  = "your-repo"
-
-[[steps]]
-name = "triage"
-prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
-profile = "cto"
-
-[[steps]]
-name = "implement"
-prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary to {{output_path}}/implement.md."
-profile = "cto"
-```
+Copy `config.example.toml` to `config.toml` and edit it.
 
 ### Step fields
 
@@ -63,7 +43,6 @@ profile = "cto"
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
 | `profile` | string | yes | Hermes profile passed via `--profile` |
-| `worktree` | bool | no | When `true`, passes `--worktree` to hermes (default: `false`) |
 | `provider` | string | no | Passed to hermes via `--provider` |
 | `model` | string | no | Passed to hermes via `--model` |
 

@@ -1,25 +1,21 @@
 poll_interval_secs = 60
 
+repos = [
+    {owner = "zerokrab", repo = "bento-hancho"},
+    {owner = "zerokrab", repo = "bento-bench"},
+    {owner = "zerokrab", repo = "boundless-profit-explorer"},
+    {owner = "mintybasil", repo = "agent-orchestrator"},
+]
+
+[git]
+clone = true
+worktree = true
+default_branch = "main"
+
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "zeroklaw"
 allowed_users = ["mintybasil", "zeroklaw"]
-
-[[repos]]
-owner = "zerokrab"
-repo = "bento-hancho"
-
-[[repos]]
-owner = "zerokrab"
-repo = "bento-bench"
-
-[[repos]]
-owner = "zerokrab"
-repo = "boundless-profit-explorer"
-
-[[repos]]
-owner = "mintybasil"
-repo = "agent-orchestrator"
 
 # Workflow steps executed sequentially for each assigned issue.
 # Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
