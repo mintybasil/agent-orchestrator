@@ -53,20 +53,20 @@ fn clone_repo(
     repo: &str,
     token: &str,
     current_exe: &Path,
-    target_dir: &Path,
+    path: &Path,
 ) -> anyhow::Result<()> {
     let url = format!("https://github.com/{}/{}.git", owner, repo);
 
     tracing::info!("Cloning repo...");
 
     // Ensure parent directory exists
-    if let Some(parent) = target_dir.parent() {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
     let output = git_command(token, current_exe)
         .args(["clone", "--quiet", &url])
-        .arg(target_dir)
+        .arg(path)
         .output()
         .context("failed to spawn git clone")?;
 
@@ -92,16 +92,16 @@ fn clone_repo(
 /// a feature branch or have local changes.
 #[instrument(skip(token, current_exe))]
 fn pull_default_branch(
-    repo_path: &Path,
-    default_branch: &str,
+    repo: &Path,
+    base: &str,
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<()> {
     tracing::info!("Pulling latest changes...");
 
     let output = git_command(token, current_exe)
-        .args(["pull", "--quiet", "origin", default_branch])
-        .current_dir(repo_path)
+        .args(["pull", "--quiet", "origin", base])
+        .current_dir(repo)
         .output()
         .context("failed to spawn git pull")?;
 
@@ -119,40 +119,40 @@ fn pull_default_branch(
     }
 }
 
-/// Create a git worktree at `worktree_path` based on `default_branch`.
+/// Create a git worktree at `path` based on `base`.
 ///
-/// The worktree is created on a new unique branch (`branch_name`) starting
-/// from `default_branch`. This avoids the git restriction that prevents a
+/// The worktree is created on a new unique branch (`branch`) starting
+/// from `base`. This avoids the git restriction that prevents a
 /// worktree from sharing the same branch as the main clone.
 ///
 /// Returns the name of the created branch so it can be cleaned up later.
 #[instrument(skip(token, current_exe))]
 pub fn create_worktree(
-    repo_path: &Path,
-    worktree_path: &Path,
-    default_branch: &str,
-    branch_name: &str,
+    repo: &Path,
+    path: &Path,
+    base: &str,
+    branch: &str,
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<String> {
     tracing::info!("Creating worktree...");
 
     // Ensure parent directory exists
-    if let Some(parent) = worktree_path.parent() {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
     let output = git_command(token, current_exe)
-        .args(["worktree", "add", "-b", branch_name])
-        .arg(worktree_path)
-        .arg(default_branch)
-        .current_dir(repo_path)
+        .args(["worktree", "add", "-b", branch])
+        .arg(path)
+        .arg(base)
+        .current_dir(repo)
         .output()
         .context("failed to spawn git worktree add")?;
 
     if output.status.success() {
         tracing::info!("Worktree created");
-        Ok(branch_name.to_string())
+        Ok(branch.to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let scrubbed = scrub_credentials(&stderr);
@@ -171,9 +171,9 @@ pub fn create_worktree(
 /// are uncommitted changes.
 #[instrument(skip(token, current_exe))]
 pub fn remove_worktree(
-    repo_path: &Path,
-    worktree_path: &Path,
-    branch_name: &str,
+    repo: &Path,
+    path: &Path,
+    branch: &str,
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<()> {
@@ -181,8 +181,8 @@ pub fn remove_worktree(
 
     let output = git_command(token, current_exe)
         .args(["worktree", "remove", "--force"])
-        .arg(worktree_path)
-        .current_dir(repo_path)
+        .arg(path)
+        .current_dir(repo)
         .output()
         .context("failed to spawn git worktree remove")?;
 
@@ -200,8 +200,8 @@ pub fn remove_worktree(
 
     // Delete the branch now that the worktree is gone.
     let branch_output = git_command(token, current_exe)
-        .args(["branch", "-D", branch_name])
-        .current_dir(repo_path)
+        .args(["branch", "-D", branch])
+        .current_dir(repo)
         .output()
         .context("failed to spawn git branch -D")?;
 

@@ -108,7 +108,7 @@ pub async fn run_event(
         // checkout and across parallel/failed runs.  The `key` (e.g. "acme/project#42")
         // is already unique per-event, and the timestamp adds extra uniqueness
         // for re-runs of the same event after a prior failure.
-        let branch_name = format!(
+        let branch = format!(
             "ao/{}-{}",
             key.label.replace(['/', '#'], "-"),
             Utc::now().timestamp()
@@ -119,11 +119,11 @@ pub async fn run_event(
             repo,
             &wt_path,
             &git_config.default_branch,
-            &branch_name,
+            &branch,
             token,
             current_exe,
         )?;
-        Some((wt_path, branch_name))
+        Some((wt_path, branch))
     } else {
         None
     };
@@ -177,12 +177,12 @@ pub async fn run_event(
     let result = run_steps(steps, &ctx).await;
 
     // Clean up worktree if one was created.
-    if let Some((ref wt_path, ref branch_name)) = worktree_info {
+    if let Some((ref wt_path, ref branch)) = worktree_info {
         let repo = repo_dir.as_ref().unwrap();
         if let Err(cleanup_err) = cleanup_worktree(
             repo,
             wt_path,
-            branch_name,
+            branch,
             token,
             current_exe,
             &git_config.default_branch,
@@ -282,7 +282,7 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 fn cleanup_worktree(
     repo_path: &Path,
     worktree_path: &Path,
-    branch_name: &str,
+    branch: &str,
     token: &str,
     current_exe: &Path,
     default_branch: &str,
@@ -301,7 +301,7 @@ fn cleanup_worktree(
     }
 
     // Safe to remove — clean and pushed.
-    git::remove_worktree(repo_path, worktree_path, branch_name, token, current_exe)
+    git::remove_worktree(repo_path, worktree_path, branch, token, current_exe)
 }
 
 #[cfg(test)]
