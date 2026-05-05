@@ -6,9 +6,10 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use tracing::info_span;
+use tracing::instrument;
 
 /// Identifies a trigger event uniquely (issue, PR review, etc.).
+#[derive(Debug)]
 pub struct EventKey {
     pub owner: String,
     pub repo: String,
@@ -33,6 +34,7 @@ impl std::fmt::Display for EventKey {
 /// data_root is the base data/ directory (e.g. PathBuf::from("data")).
 /// token is the GitHub token used for authenticating git operations.
 /// current_exe is the path to this binary, used as GIT_ASKPASS helper.
+#[instrument(skip(data_root, steps, token, current_exe))]
 pub async fn run_event(
     key: &EventKey,
     data_root: &Path,
@@ -50,68 +52,87 @@ pub async fn run_event(
     let workspace_dir =
         git::ensure_workspace(data_root, &key.owner, &key.repo, token, current_exe)?;
 
+    // Build global template variables.
+    let mut vars: HashMap<&str, String> = [
+        ("owner", key.owner.clone()),
+        ("repo", key.repo.clone()),
+        (
+            "output_path",
+            issue_dir.clone().to_string_lossy().into_owned(),
+        ),
+        ("workspace", workspace_dir.to_string_lossy().into_owned()),
+    ]
+    .into_iter()
+    .collect();
+
+    // Merge trigger-specific variables (e.g. issue_number, pr_number).
+    // Trigger variables use owned Strings; we borrow them as &str.
+    for (k, v) in &key.variables {
+        vars.insert(k.as_str(), v.clone());
+    }
+
     for (idx, step) in steps.iter().enumerate() {
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
 
-        // Build global template variables.
-        let mut vars: HashMap<&str, String> = [
-            ("owner", key.owner.clone()),
-            ("repo", key.repo.clone()),
-            ("output_path", issue_dir.to_string_lossy().into_owned()),
-            ("workspace", workspace_dir.to_string_lossy().into_owned()),
-        ]
-        .into_iter()
-        .collect();
-
-        // Merge trigger-specific variables (e.g. issue_number, pr_number).
-        // Trigger variables use owned Strings; we borrow them as &str.
-        for (k, v) in &key.variables {
-            vars.insert(k.as_str(), v.clone());
-        }
-
-        // Create a span for the entire step iteration — pre-hooks, agent,
-        // post-hooks, and all their log output inherit this context.
-        let harness = step.harness.build();
-        let span = info_span!(
-            "step",
-            issue = %key,
-            step_name = %step.name,
-            harness = %harness.name(),
-        );
-        let _enter = span.enter();
-
-        // --- Pre-hooks -----------------------------------------------------------
-        for hook in &step.pre_hooks {
-            hooks::run_hook(hook, &vars, &error_path, token, current_exe).map_err(|e| {
-                tracing::error!(step = step.name, "pre-hook FAILED: {}", e);
-                e
-            })?;
-        }
-
-        tracing::info!("started");
-
-        // Run the harness.
-        let rendered_prompt = render(&step.prompt_template, &vars);
-        harness
-            .run_step(
-                step,
-                &workspace_dir,
-                &rendered_prompt,
-                &error_path,
-                &key.to_string(),
-            )
-            .await?;
-
-        // --- Post-hooks ----------------------------------------------------------
-        for hook in &step.post_hooks {
-            hooks::run_hook(hook, &vars, &error_path, token, current_exe).map_err(|e| {
-                tracing::error!(step = step.name, "post-hook FAILED: {}", e);
-                e
-            })?;
-        }
-
-        tracing::info!("completed");
+        run_step(
+            step,
+            &error_path,
+            &vars,
+            token,
+            current_exe,
+            &workspace_dir,
+            key,
+        )
+        .await?
     }
+
+    Ok(())
+}
+
+#[instrument(skip(step, error_path, vars, token, current_exe, workspace_dir), fields(step=step.name))]
+async fn run_step(
+    step: &Step,
+    error_path: &Path,
+    vars: &HashMap<&str, String>,
+    token: &str,
+    current_exe: &Path,
+    workspace_dir: &Path,
+    key: &EventKey,
+) -> Result<()> {
+    tracing::info!("Starting step");
+    // --- Pre-hooks -----------------------------------------------------------
+    for hook in &step.pre_hooks {
+        hooks::run_hook(hook, vars, error_path, token, current_exe).map_err(|e| {
+            tracing::error!("pre-hook FAILED: {}", e);
+            e
+        })?;
+    }
+
+    let harness = step.harness.build();
+    let rendered_prompt = render(&step.prompt_template, vars);
+
+    tracing::info!("Launching harness");
+    harness
+        .run_step(
+            step,
+            workspace_dir,
+            &rendered_prompt,
+            error_path,
+            &key.to_string(),
+        )
+        .await?;
+
+    tracing::info!("Harness invocation complete");
+
+    // --- Post-hooks ----------------------------------------------------------
+    for hook in &step.post_hooks {
+        hooks::run_hook(hook, vars, error_path, token, current_exe).map_err(|e| {
+            tracing::error!(step = step.name, "post-hook FAILED: {}", e);
+            e
+        })?;
+    }
+
+    tracing::info!("Step completed");
 
     Ok(())
 }
