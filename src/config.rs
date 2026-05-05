@@ -1,6 +1,45 @@
 use crate::trigger::TriggerConfig;
 use crate::workflow::Step;
 
+/// Git configuration group.
+///
+/// Controls how the orchestrator manages the repository clone and worktrees.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct GitConfig {
+    /// Branch that worktrees are based on and the repo is checked out on.
+    /// Defaults to "main" if not specified.
+    #[serde(default = "default_branch")]
+    pub default_branch: String,
+
+    /// When true (default), the orchestrator clones/pulls the repo before
+    /// running workflow steps. When false, no git operations are performed.
+    #[serde(default = "default_true")]
+    pub clone: bool,
+
+    /// When true, a fresh git worktree is created for each workflow run and
+    /// removed on completion. Requires `clone = true`.
+    #[serde(default)]
+    pub worktree: bool,
+}
+
+fn default_branch() -> String {
+    "main".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            default_branch: default_branch(),
+            clone: true,
+            worktree: false,
+        }
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
     pub poll_interval_secs: u64,
@@ -11,6 +50,10 @@ pub struct Config {
     pub triggers: Vec<TriggerConfig>,
 
     pub repos: Vec<RepoConfig>,
+
+    /// Git configuration for repo and worktree management.
+    #[serde(default)]
+    pub git: GitConfig,
 
     /// Steps to execute. Empty vec is allowed at deserialization but rejected by Config::load.
     #[serde(default)]
@@ -41,6 +84,11 @@ impl Config {
         anyhow::ensure!(
             !config.steps.is_empty(),
             "config {:?} contains no [[steps]]",
+            path
+        );
+        anyhow::ensure!(
+            !config.git.worktree || config.git.clone,
+            "config {:?}: git.worktree requires git.clone to be true",
             path
         );
         Ok(config)
@@ -195,6 +243,68 @@ path = "{{output_path}}"
         assert!(
             msg.contains("file_not_empty") || msg.contains("unknown variant"),
             "expected TOML error detail in error message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn git_config_defaults() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let config = Config::load(f.path()).unwrap();
+        assert_eq!(config.git.default_branch, "main");
+        assert!(config.git.clone);
+        assert!(!config.git.worktree);
+    }
+
+    #[test]
+    fn git_worktree_requires_clone() {
+        use std::io::Write;
+        let toml = r#"
+poll_interval_secs = 60
+
+[git]
+clone = false
+worktree = true
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("worktree requires git.clone"),
+            "expected worktree/requires/clone error, got: {msg}"
         );
     }
 

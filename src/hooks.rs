@@ -45,7 +45,7 @@ pub enum Hook {
 /// push operations via the ASKPASS mechanism. Other hook types ignore them.
 pub fn run_hook(
     hook: &Hook,
-    vars: &HashMap<&str, String>,
+    vars: &HashMap<String, String>,
     error_path: &Path,
     token: &str,
     current_exe: &Path,
@@ -114,10 +114,10 @@ pub fn run_hook(
         }
 
         Hook::PushCode => {
-            let workspace = vars
-                .get("workspace")
-                .ok_or_else(|| anyhow::anyhow!("hook PushCode: workspace variable missing"))?;
-            let workspace_path = Path::new(workspace);
+            let repo_path = vars
+                .get("repo_path")
+                .ok_or_else(|| anyhow::anyhow!("hook PushCode: repo_path variable missing"))?;
+            let workspace_path = Path::new(repo_path);
 
             // Check for unpushed commits: git rev-list @{u}..HEAD
             // This lists commits reachable from HEAD but not from the upstream branch.
@@ -205,8 +205,8 @@ type = "push_code"
         let path = f.path().to_string_lossy().into_owned();
 
         let hook = Hook::FileNotEmpty { path };
-        let mut vars = HashMap::new();
-        vars.insert("output_path", "/tmp".to_string());
+        let mut vars: HashMap<String, String> = HashMap::new();
+        vars.insert("output_path".to_string(), "/tmp".to_string());
         let error_path = tempfile::NamedTempFile::new().unwrap();
         assert!(
             run_hook(
@@ -225,7 +225,7 @@ type = "push_code"
         let hook = Hook::FileNotEmpty {
             path: "/nonexistent/file.xyz".to_string(),
         };
-        let vars = HashMap::new();
+        let vars: HashMap<String, String> = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
         assert!(
             run_hook(
@@ -245,7 +245,7 @@ type = "push_code"
         let path = f.path().to_string_lossy().into_owned();
 
         let hook = Hook::FileNotEmpty { path };
-        let vars = HashMap::new();
+        let vars: HashMap<String, String> = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
         assert!(
             run_hook(

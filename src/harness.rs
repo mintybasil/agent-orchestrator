@@ -23,7 +23,7 @@ pub struct LogConfig {
 /// Config-side harness definition deserialized from TOML.
 ///
 /// Each variant carries harness-specific options. For example,
-/// `Hermes` has `profile`, `worktree`, `provider`, and `model`,
+/// `Hermes` has `profile`, `provider`, and `model`,
 /// because those are hermes CLI flags — not generic step concerns.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -31,14 +31,11 @@ pub enum HarnessConfig {
     /// Invoke the hermes CLI agent.
     ///
     /// ```toml
-    /// harness = { type = "hermes", profile = "cto", worktree = true, provider = "openai", model = "o3" }
+    /// harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3" }
     /// ```
     Hermes {
         /// Required: hermes profile name passed via `--profile <name>`.
         profile: String,
-        /// When true, passes `--worktree` to hermes.
-        #[serde(default)]
-        worktree: bool,
         /// Optional provider passed to hermes via `--provider <provider>`.
         #[serde(default)]
         provider: Option<String>,
@@ -80,12 +77,10 @@ impl HarnessConfig {
         match self {
             HarnessConfig::Hermes {
                 profile,
-                worktree,
                 provider,
                 model,
             } => Box::new(crate::hermes::HermesHarness {
                 profile: profile.clone(),
-                worktree: *worktree,
                 provider: provider.clone(),
                 model: model.clone(),
             }),
@@ -102,7 +97,6 @@ mod tests {
         let toml = r#"
 type = "hermes"
 profile = "cto"
-worktree = true
 provider = "openai"
 model = "o3"
 "#;
@@ -110,12 +104,10 @@ model = "o3"
         match config {
             HarnessConfig::Hermes {
                 profile,
-                worktree,
                 provider,
                 model,
             } => {
                 assert_eq!(profile, "cto");
-                assert!(worktree);
                 assert_eq!(provider, Some("openai".to_string()));
                 assert_eq!(model, Some("o3".to_string()));
             }
@@ -132,12 +124,10 @@ profile = "cto"
         match config {
             HarnessConfig::Hermes {
                 profile,
-                worktree,
                 provider,
                 model,
             } => {
                 assert_eq!(profile, "cto");
-                assert!(!worktree);
                 assert!(provider.is_none());
                 assert!(model.is_none());
             }
@@ -148,7 +138,6 @@ profile = "cto"
     fn build_hermes() {
         let config = HarnessConfig::Hermes {
             profile: "cto".to_string(),
-            worktree: false,
             provider: None,
             model: None,
         };
