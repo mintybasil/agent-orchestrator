@@ -53,20 +53,20 @@ fn clone_repo(
     repo: &str,
     token: &str,
     current_exe: &Path,
-    target_dir: &Path,
+    path: &Path,
 ) -> anyhow::Result<()> {
     let url = format!("https://github.com/{}/{}.git", owner, repo);
 
     tracing::info!("Cloning repo...");
 
     // Ensure parent directory exists
-    if let Some(parent) = target_dir.parent() {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
     let output = git_command(token, current_exe)
         .args(["clone", "--quiet", &url])
-        .arg(target_dir)
+        .arg(path)
         .output()
         .context("failed to spawn git clone")?;
 
@@ -92,16 +92,16 @@ fn clone_repo(
 /// a feature branch or have local changes.
 #[instrument(skip(token, current_exe))]
 fn pull_default_branch(
-    repo_path: &Path,
-    default_branch: &str,
+    repo: &Path,
+    base: &str,
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<()> {
     tracing::info!("Pulling latest changes...");
 
     let output = git_command(token, current_exe)
-        .args(["pull", "--quiet", "origin", default_branch])
-        .current_dir(repo_path)
+        .args(["pull", "--quiet", "origin", base])
+        .current_dir(repo)
         .output()
         .context("failed to spawn git pull")?;
 
@@ -110,48 +110,49 @@ fn pull_default_branch(
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let scrubbed = scrub_credentials(&stderr);
         tracing::warn!(
-            "git pull failed (exit code {:?}): {}; proceeding with existing checkout",
-            output.status.code(),
-            scrubbed
+            exit_code = output.status.code(),
+            error = %scrub_credentials(&stderr),
+            "git pull failed; proceeding with existing checkout"
         );
         Ok(())
     }
 }
 
-/// Create a git worktree at `worktree_path` based on `default_branch`.
+/// Create a git worktree at `path` based on `base`.
 ///
-/// The worktree is a lightweight checkout of the repository that lives
-/// alongside the main clone. It is created with a detached HEAD at the
-/// tip of `default_branch`, so no branch tracking is set up — the agent
-/// can create its own branches inside the worktree.
+/// The worktree is created on a new unique branch (`branch`) starting
+/// from `base`. This avoids the git restriction that prevents a
+/// worktree from sharing the same branch as the main clone.
+///
+/// Returns the name of the created branch so it can be cleaned up later.
 #[instrument(skip(token, current_exe))]
 pub fn create_worktree(
-    repo_path: &Path,
-    worktree_path: &Path,
-    default_branch: &str,
+    repo: &Path,
+    path: &Path,
+    base: &str,
+    branch: &str,
     token: &str,
     current_exe: &Path,
-) -> anyhow::Result<()> {
-    tracing::info!(path = %worktree_path.display(), "Creating worktree...");
+) -> anyhow::Result<String> {
+    tracing::info!("Creating worktree...");
 
     // Ensure parent directory exists
-    if let Some(parent) = worktree_path.parent() {
+    if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
     let output = git_command(token, current_exe)
-        .args(["worktree", "add"])
-        .arg(worktree_path)
-        .arg(default_branch)
-        .current_dir(repo_path)
+        .args(["worktree", "add", "-b", branch])
+        .arg(path)
+        .arg(base)
+        .current_dir(repo)
         .output()
         .context("failed to spawn git worktree add")?;
 
     if output.status.success() {
         tracing::info!("Worktree created");
-        Ok(())
+        Ok(branch.to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let scrubbed = scrub_credentials(&stderr);
@@ -163,29 +164,30 @@ pub fn create_worktree(
     }
 }
 
-/// Remove a git worktree at the given path.
+/// Remove a git worktree at the given path and delete its associated branch.
 ///
-/// Runs `git worktree remove` from the main repository. Forces removal
-/// even if there are uncommitted changes.
+/// Runs `git worktree remove` from the main repository, then prunes the
+/// branch that was created for the worktree. Forces removal even if there
+/// are uncommitted changes.
 #[instrument(skip(token, current_exe))]
 pub fn remove_worktree(
-    repo_path: &Path,
-    worktree_path: &Path,
+    repo: &Path,
+    path: &Path,
+    branch: &str,
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<()> {
-    tracing::info!(path = %worktree_path.display(), "Removing worktree...");
+    tracing::info!("Removing worktree...");
 
     let output = git_command(token, current_exe)
         .args(["worktree", "remove", "--force"])
-        .arg(worktree_path)
-        .current_dir(repo_path)
+        .arg(path)
+        .current_dir(repo)
         .output()
         .context("failed to spawn git worktree remove")?;
 
     if output.status.success() {
         tracing::info!("Worktree removed");
-        Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let scrubbed = scrub_credentials(&stderr);
@@ -195,6 +197,27 @@ pub fn remove_worktree(
             scrubbed
         );
     }
+
+    // Delete the branch now that the worktree is gone.
+    let branch_output = git_command(token, current_exe)
+        .args(["branch", "-D", branch])
+        .current_dir(repo)
+        .output()
+        .context("failed to spawn git branch -D")?;
+
+    if branch_output.status.success() {
+        tracing::debug!("Branch deleted");
+    } else {
+        // Non-fatal: branch may have been deleted by a prior cleanup attempt
+        // or renamed by the agent during the workflow run.
+        let stderr = String::from_utf8_lossy(&branch_output.stderr);
+        tracing::warn!(
+            error = %scrub_credentials(&stderr),
+            "Failed to delete worktree branch"
+        );
+    }
+
+    Ok(())
 }
 
 /// Check for uncommitted changes in the given directory.
