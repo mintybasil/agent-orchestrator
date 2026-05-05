@@ -263,7 +263,6 @@ type = "push_code"
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
 | `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
-| `{{workspace}}` | Backwards-compatible alias: path to the repo clone when `git.clone = true`, otherwise the output directory |
 | `{{repo_path}}` | Path to the base repository clone (`<data-dir>/<owner>/<repo>/repo/`); empty string when `git.clone = false` |
 
 ### Hook types

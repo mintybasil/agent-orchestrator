@@ -68,14 +68,14 @@ mod tests {
     }
 
     #[test]
-    fn workspace_substitution() {
+    fn repo_path_substitution() {
         let mut vars = HashMap::new();
         vars.insert(
-            "workspace".to_string(),
-            "/data/owner/repo/workspace".to_string(),
+            "repo_path".to_string(),
+            "/data/owner/repo/repo".to_string(),
         );
-        let result = render("Work in {{workspace}} for this issue.", &vars);
-        assert_eq!(result, "Work in /data/owner/repo/workspace for this issue.");
+        let result = render("Work in {{repo_path}} for this issue.", &vars);
+        assert_eq!(result, "Work in /data/owner/repo/repo for this issue.");
     }
 
     #[test]
@@ -91,14 +91,14 @@ mod tests {
     #[test]
     fn trigger_specific_vars_merge_with_globals() {
         // Simulates the merging logic from runner::run_event:
-        // global vars (owner, repo, output_path, workspace) + trigger vars
+        // global vars (owner, repo, output_path, repo_path) + trigger vars
         let mut vars: HashMap<String, String> = [
             ("owner".into(), "acme".to_string()),
             ("repo".into(), "project".to_string()),
             ("output_path".into(), "/data/acme/project/42".to_string()),
             (
-                "workspace".into(),
-                "/data/acme/project/workspace".to_string(),
+                "repo_path".into(),
+                "/data/acme/project/repo".to_string(),
             ),
         ]
         .into_iter()

@@ -135,17 +135,8 @@ pub async fn run_event(
             workspace_dir.clone().to_string_lossy().into_owned(),
         ),
         (
-            // {{workspace}} is kept as a backwards-compatible alias for the
-            // repo path. New configs should prefer {{repo_path}}.
-            "workspace".into(),
-            repo_dir
-                .clone()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| workspace_dir.clone().to_string_lossy().into_owned()),
-        ),
-        (
             // {{repo_path}} gives the path to the base repository clone.
-            // Unavailable when git.clone = false.
+            // Empty string when git.clone = false (no repo checkout).
             "repo_path".into(),
             repo_dir
                 .clone()

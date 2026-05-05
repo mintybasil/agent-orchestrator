@@ -114,10 +114,10 @@ pub fn run_hook(
         }
 
         Hook::PushCode => {
-            let workspace = vars
-                .get("workspace")
-                .ok_or_else(|| anyhow::anyhow!("hook PushCode: workspace variable missing"))?;
-            let workspace_path = Path::new(workspace);
+            let repo_path = vars
+                .get("repo_path")
+                .ok_or_else(|| anyhow::anyhow!("hook PushCode: repo_path variable missing"))?;
+            let workspace_path = Path::new(repo_path);
 
             // Check for unpushed commits: git rev-list @{u}..HEAD
             // This lists commits reachable from HEAD but not from the upstream branch.
