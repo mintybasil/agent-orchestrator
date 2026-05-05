@@ -12,15 +12,19 @@ use tracing::info_span;
 pub struct EventKey {
     pub owner: String,
     pub repo: String,
-    /// Opaque numeric identifier (issue number, PR number, etc.).
+    /// Opaque numeric identifier (issue number, review ID, etc.).
+    /// Used for data directory paths — not for display.
     pub number: u64,
+    /// Human-readable label for logging (e.g. "acme/project#42" for issues,
+    /// "acme/project#review_1234567" for PR reviews).
+    pub label: String,
     /// Trigger-specific template variables carried from the TriggerEvent.
     pub variables: HashMap<String, String>,
 }
 
 impl std::fmt::Display for EventKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}#{}", self.owner, self.repo, self.number)
+        write!(f, "{}", self.label)
     }
 }
 

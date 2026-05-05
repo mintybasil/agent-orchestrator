@@ -73,6 +73,7 @@ pub async fn run_poll_loop(
                     owner: event.owner.clone(),
                     repo: event.repo.clone(),
                     number: issue_number,
+                    label: event.label.clone(),
                     variables: event.variables.clone(),
                 };
 
