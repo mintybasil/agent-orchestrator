@@ -110,11 +110,10 @@ fn pull_default_branch(
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let scrubbed = scrub_credentials(&stderr);
         tracing::warn!(
-            "git pull failed (exit code {:?}): {}; proceeding with existing checkout",
-            output.status.code(),
-            scrubbed
+            exit_code = output.status.code(),
+            error = %scrub_credentials(&stderr),
+            "git pull failed; proceeding with existing checkout"
         );
         Ok(())
     }
@@ -136,11 +135,7 @@ pub fn create_worktree(
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<String> {
-    tracing::info!(
-        path = %worktree_path.display(),
-        branch = branch_name,
-        "Creating worktree..."
-    );
+    tracing::info!("Creating worktree...");
 
     // Ensure parent directory exists
     if let Some(parent) = worktree_path.parent() {
@@ -156,7 +151,7 @@ pub fn create_worktree(
         .context("failed to spawn git worktree add")?;
 
     if output.status.success() {
-        tracing::info!(branch = branch_name, "Worktree created");
+        tracing::info!("Worktree created");
         Ok(branch_name.to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -182,7 +177,7 @@ pub fn remove_worktree(
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<()> {
-    tracing::info!(path = %worktree_path.display(), "Removing worktree...");
+    tracing::info!("Removing worktree...");
 
     let output = git_command(token, current_exe)
         .args(["worktree", "remove", "--force"])
@@ -211,13 +206,12 @@ pub fn remove_worktree(
         .context("failed to spawn git branch -D")?;
 
     if branch_output.status.success() {
-        tracing::debug!(branch = branch_name, "Branch deleted");
+        tracing::debug!("Branch deleted");
     } else {
         // Non-fatal: branch may have been deleted by a prior cleanup attempt
         // or renamed by the agent during the workflow run.
         let stderr = String::from_utf8_lossy(&branch_output.stderr);
         tracing::warn!(
-            branch = branch_name,
             error = %scrub_credentials(&stderr),
             "Failed to delete worktree branch"
         );
