@@ -97,6 +97,8 @@ Each monitored repo gets a workspace directory under the data dir:
   {owner}/{repo}/
     workspace/           -- git clone of the repo (auto-managed)
     {issue_number}/      -- per-issue output directory
+      step_NN_<name>.log   -- full harness stdout+stderr log
+      step_NN_<name>.error -- stderr on failure only
   completed.json         -- set of completed issue keys
   failed.json            -- list of failed issue entries
 ```
@@ -142,7 +144,9 @@ a `.tmp` file then renamed into place.
 **Pipe deadlock prevention**: `hermes.rs` drains `stderr` on a dedicated
 `std::thread` concurrently with the main thread draining `stdout`. This avoids
 deadlock when the subprocess writes enough output to fill the OS pipe buffer
-on both streams simultaneously.
+on both streams simultaneously. Both streams are written to a per-step log
+file (`step_NN_<name>.log`); when `--show-logs` is set, they are also printed
+via tracing.
 
 **GitHub pagination**: `list_assigned_issues()` loops with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
@@ -247,6 +251,7 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 - `hermes` must be on `PATH` (validated on startup, hard exit if missing).
 - `<data-dir>` must be writable (validated on startup, hard exit if not); override with `--data-dir` (default: `~/.agent-orchestrator`).
 - Config file must be readable TOML (validated on startup, hard exit if not).
+- `--show-logs` flag: when set, harness output is printed to the terminal in addition to being written to log files. Log files are always written.
 
 ## Debugging a failed issue
 

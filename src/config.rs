@@ -58,6 +58,11 @@ pub struct Cli {
 
     #[arg(long, value_name = "DIR")]
     pub data_dir: Option<std::path::PathBuf>,
+
+    /// Print harness agent stdout/stderr to the terminal in addition to
+    /// writing them to log files in the data directory.
+    #[arg(long)]
+    pub show_logs: bool,
 }
 
 #[cfg(test)]

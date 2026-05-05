@@ -18,6 +18,8 @@ pub struct InvokeArgs {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub error_file: PathBuf,
+    pub log_file: PathBuf,
+    pub show_logs: bool,
     pub work_dir: Option<PathBuf>,
     pub issue: String,
     pub step: String,
@@ -27,6 +29,9 @@ pub struct InvokeArgs {
 ///
 /// Always passes `--yolo` and `--quiet`. If `work_dir` is provided, hermes
 /// runs from that directory (which becomes its project root).
+///
+/// All stdout and stderr output is written to `args.log_file`. When
+/// `args.show_logs` is true, output is also printed via tracing.
 ///
 /// Log lines include explicit `issue` and `step` fields from `InvokeArgs`,
 /// ensuring context is visible regardless of tracing formatter configuration.
@@ -72,6 +77,14 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
     let stderr_issue = args.issue.clone();
     let stderr_step = args.step.clone();
 
+    // Create the log file. Both stdout and stderr threads write here.
+    let log_file = std::fs::File::create(&args.log_file)
+        .map_err(|e| anyhow::anyhow!("failed to create log file {:?}: {}", args.log_file, e))?;
+    let log_file_stdout = Arc::new(Mutex::new(log_file));
+    let log_file_stderr = Arc::clone(&log_file_stdout);
+
+    let show_logs = args.show_logs;
+
     // Drain stderr on a dedicated thread (concurrent with stdout drain)
     let stderr_stream = child.stderr.take();
     let stderr_capture_clone = Arc::clone(&stderr_capture);
@@ -82,7 +95,17 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
             for line in reader.lines() {
                 match line {
                     Ok(l) => {
-                        tracing::error!(issue = %stderr_issue, step = %stderr_step, "{}", l);
+                        if show_logs {
+                            tracing::error!(issue = %stderr_issue, step = %stderr_step, "{}", l);
+                        }
+                        // Write to log file
+                        {
+                            let mut file =
+                                log_file_stderr.lock().unwrap_or_else(|e| e.into_inner());
+                            use std::io::Write;
+                            let _ = writeln!(file, "{}", l);
+                        }
+                        // Capture for error_file on failure
                         let mut cap = stderr_capture_clone
                             .lock()
                             .unwrap_or_else(|e| e.into_inner());
@@ -102,7 +125,17 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             match line {
-                Ok(l) => tracing::info!(issue = %args.issue, step = %args.step, "{}", l),
+                Ok(l) => {
+                    if show_logs {
+                        tracing::info!(issue = %args.issue, step = %args.step, "{}", l);
+                    }
+                    // Write to log file
+                    {
+                        let mut file = log_file_stdout.lock().unwrap_or_else(|e| e.into_inner());
+                        use std::io::Write;
+                        let _ = writeln!(file, "{}", l);
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(issue = %args.issue, step = %args.step, "stdout read error: {}", e)
                 }
@@ -152,6 +185,7 @@ impl Harness for HermesHarness {
         rendered_prompt: &str,
         error_path: &Path,
         issue: &str,
+        log_config: &crate::harness::LogConfig,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
         let args = InvokeArgs {
             prompt: rendered_prompt.to_string(),
@@ -160,6 +194,8 @@ impl Harness for HermesHarness {
             provider: self.provider.clone(),
             model: self.model.clone(),
             error_file: error_path.to_path_buf(),
+            log_file: log_config.log_path.clone(),
+            show_logs: log_config.show_logs,
             work_dir: Some(workspace_dir.to_path_buf()),
             issue: issue.to_string(),
             step: step.name.clone(),

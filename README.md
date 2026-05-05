@@ -120,6 +120,7 @@ export GITHUB_TOKEN=***
 
 The `--config` flag defaults to `config.toml` in the current directory.
 Use `--data-dir <DIR>` to override the default data directory (`~/.agent-orchestrator`).
+Use `--show-logs` to print harness agent stdout/stderr to the terminal in addition to writing them to log files in the data directory. Log files are always written regardless of this flag.
 The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
 
 On startup the daemon validates:
@@ -138,6 +139,8 @@ Any validation failure exits with a descriptive error message.
 ├── completed.json              # Array of "owner/repo/N" keys
 ├── failed.json                # Array of {key, timestamp, error} objects
 └── {owner}/{repo}/{issue_number}/
+    ├── step_NN_<name>.log      # Full harness stdout+stderr log (always written)
+    ├── step_NN_<name>.error   # stderr on failure only
     └── step_NN_<name>.md      # Step output files written by hermes
 ```
 

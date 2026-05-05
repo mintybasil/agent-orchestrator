@@ -33,12 +33,14 @@ impl std::fmt::Display for EventKey {
 /// data_root is the base data/ directory (e.g. PathBuf::from("data")).
 /// token is the GitHub token used for authenticating git operations.
 /// current_exe is the path to this binary, used as GIT_ASKPASS helper.
+/// show_logs controls whether harness output is also printed to the terminal.
 pub async fn run_event(
     key: &EventKey,
     data_root: &Path,
     steps: &[Step],
     token: &str,
     current_exe: &Path,
+    show_logs: bool,
 ) -> Result<()> {
     let issue_dir = data_root
         .join(&key.owner)
@@ -52,6 +54,7 @@ pub async fn run_event(
 
     for (idx, step) in steps.iter().enumerate() {
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
+        let log_path = issue_dir.join(format!("step_{:02}_{}.log", idx, step.name));
 
         // Build global template variables.
         let mut vars: HashMap<&str, String> = [
@@ -99,6 +102,10 @@ pub async fn run_event(
                 &rendered_prompt,
                 &error_path,
                 &key.to_string(),
+                &crate::harness::LogConfig {
+                    log_path: log_path.clone(),
+                    show_logs,
+                },
             )
             .await?;
 

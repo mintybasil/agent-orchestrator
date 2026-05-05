@@ -9,6 +9,17 @@ use crate::workflow::Step;
 use anyhow::Result;
 use std::path::Path;
 
+/// Log output configuration passed to harness implementations.
+///
+/// Groups the log file path and display preference so the `Harness::run_step`
+/// signature stays within clippy's argument limit.
+pub struct LogConfig {
+    /// Path to the log file where stdout and stderr will be written.
+    pub log_path: std::path::PathBuf,
+    /// When true, harness output is also printed to the terminal via tracing.
+    pub show_logs: bool,
+}
+
 /// Config-side harness definition deserialized from TOML.
 ///
 /// Each variant carries harness-specific options. For example,
@@ -59,6 +70,7 @@ pub trait Harness {
         rendered_prompt: &str,
         error_path: &Path,
         issue: &str,
+        log_config: &LogConfig,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>>;
 }
 
