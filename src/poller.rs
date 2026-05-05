@@ -25,6 +25,7 @@ pub async fn run_poll_loop(
     completed: Arc<Mutex<HashSet<String>>>,
     workflow_steps: Vec<workflow::Step>,
     current_exe: &Path,
+    show_logs: bool,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -73,6 +74,7 @@ pub async fn run_poll_loop(
                     owner: event.owner.clone(),
                     repo: event.repo.clone(),
                     number: issue_number,
+                    label: event.label.clone(),
                     variables: event.variables.clone(),
                 };
 
@@ -116,6 +118,7 @@ pub async fn run_poll_loop(
                 let key_str_clone = key_str.clone();
                 let token_clone = token.clone();
                 let current_exe_clone = current_exe.to_path_buf();
+                let show_logs_clone = show_logs;
                 let failed_path = data_root.join("failed.json");
                 let completed_path = data_root.join("completed.json");
                 let steps_clone = Arc::clone(&workflow_steps);
@@ -127,6 +130,7 @@ pub async fn run_poll_loop(
                         &steps_clone,
                         &token_clone,
                         &current_exe_clone,
+                        show_logs_clone,
                     )
                     .await;
                     in_flight_clone

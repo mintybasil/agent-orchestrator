@@ -56,6 +56,7 @@ pub async fn list_assigned_issues(
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PrReview {
+    pub id: u64,
     pub pr_number: u64,
     pub user: String,
 }
@@ -67,6 +68,7 @@ struct ReviewUser {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ReviewResponse {
+    id: u64,
     user: ReviewUser,
 }
 
@@ -136,6 +138,7 @@ pub async fn list_pr_reviews(
 
             for review in reviews {
                 all_reviews.push(PrReview {
+                    id: review.id,
                     pr_number: pr.number,
                     user: review.user.login,
                 });
