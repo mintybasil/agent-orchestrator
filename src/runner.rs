@@ -45,8 +45,8 @@ struct StepContext {
 /// token is the GitHub token used for authenticating git operations.
 /// current_exe is the path to this binary, used as GIT_ASKPASS helper.
 /// show_logs controls whether harness output is also printed to the terminal.
-#[instrument(skip(data_root, steps, token, current_exe))]
-pub async fn run_event(
+#[instrument(skip_all, fields(key=key.to_string()))]
+pub async fn run_workflow(
     key: &EventKey,
     data_root: &Path,
     steps: &[Step],
@@ -106,7 +106,7 @@ pub async fn run_event(
     Ok(())
 }
 
-#[instrument(skip(step, ctx, vars), fields(step=step.name, key = ctx.key))]
+#[instrument(skip_all, fields(key=ctx.key.to_string(),step=step.name), parent = None)]
 async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<&str, String>) -> Result<()> {
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------

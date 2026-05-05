@@ -46,7 +46,7 @@ pub(crate) fn git_command(token: &str, current_exe: &Path) -> Command {
 }
 
 /// Clone a GitHub repository into `target_dir`.
-#[instrument(skip(token, current_exe))]
+#[instrument(skip(token, current_exe), parent = None)]
 fn clone_repo(
     owner: &str,
     repo: &str,
@@ -89,7 +89,7 @@ fn clone_repo(
 ///
 /// Pull failure is non-fatal (logged as warning) — the workspace might be on
 /// a feature branch or have local changes.
-#[instrument(skip(token, current_exe))]
+#[instrument(skip(token, current_exe), parent = None)]
 fn pull_main(workspace: &Path, token: &str, current_exe: &Path) -> anyhow::Result<()> {
     tracing::info!("Pulling latest changes...");
 
