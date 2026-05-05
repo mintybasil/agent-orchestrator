@@ -5,7 +5,7 @@ use crate::workflow::Step;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::instrument;
 
 /// Identifies a trigger event uniquely (issue, PR review, etc.).
@@ -27,6 +27,16 @@ impl std::fmt::Display for EventKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label)
     }
+}
+
+struct StepContext {
+    error_path: PathBuf,
+    show_logs: bool,
+    log_path: PathBuf,
+    workspace_dir: PathBuf,
+    key: String,
+    token: String,
+    current_exe: PathBuf,
 }
 
 /// Run all workflow steps for a single trigger event.
@@ -62,7 +72,10 @@ pub async fn run_event(
             "output_path",
             issue_dir.clone().to_string_lossy().into_owned(),
         ),
-        ("workspace", workspace_dir.to_string_lossy().into_owned()),
+        (
+            "workspace",
+            workspace_dir.clone().to_string_lossy().to_string(),
+        ),
     ]
     .into_iter()
     .collect();
@@ -77,40 +90,33 @@ pub async fn run_event(
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
         let log_path = issue_dir.join(format!("step_{:02}_{}.log", idx, step.name));
 
-        run_step(
-            step,
-            &error_path,
-            &log_path,
-            &vars,
-            token,
-            current_exe,
-            &workspace_dir,
-            key,
-        )
-        .await?
+        let ctx = StepContext {
+            error_path,
+            show_logs,
+            log_path,
+            workspace_dir: workspace_dir.clone(),
+            key: key.to_string(),
+            token: token.into(),
+            current_exe: current_exe.into(),
+        };
+
+        run_step(step, &ctx, &vars).await?
     }
 
     Ok(())
 }
 
-#[instrument(skip(step, error_path, vars, token, current_exe, workspace_dir), fields(step=step.name))]
-async fn run_step(
-    step: &Step,
-    error_path: &Path,
-    log_path: &Path,
-    vars: &HashMap<&str, String>,
-    token: &str,
-    current_exe: &Path,
-    workspace_dir: &Path,
-    key: &EventKey,
-) -> Result<()> {
+#[instrument(skip(step, ctx, vars), fields(step=step.name, key = ctx.key))]
+async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<&str, String>) -> Result<()> {
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------
     for hook in &step.pre_hooks {
-        hooks::run_hook(hook, vars, error_path, token, current_exe).map_err(|e| {
-            tracing::error!("pre-hook FAILED: {}", e);
-            e
-        })?;
+        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
+            |e| {
+                tracing::error!("pre-hook FAILED: {}", e);
+                e
+            },
+        )?;
     }
 
     let harness = step.harness.build();
@@ -120,13 +126,13 @@ async fn run_step(
     harness
         .run_step(
             step,
-            workspace_dir,
+            &ctx.workspace_dir,
             &rendered_prompt,
-            error_path,
-            &key.to_string(),
+            &ctx.error_path,
+            &ctx.key,
             &crate::harness::LogConfig {
-                log_path: log_path.into(),
-                show_logs,
+                log_path: ctx.log_path.clone(),
+                show_logs: ctx.show_logs,
             },
         )
         .await?;
@@ -135,10 +141,12 @@ async fn run_step(
 
     // --- Post-hooks ----------------------------------------------------------
     for hook in &step.post_hooks {
-        hooks::run_hook(hook, vars, error_path, token, current_exe).map_err(|e| {
-            tracing::error!(step = step.name, "post-hook FAILED: {}", e);
-            e
-        })?;
+        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
+            |e| {
+                tracing::error!(step = step.name, "post-hook FAILED: {}", e);
+                e
+            },
+        )?;
     }
 
     tracing::info!("Step completed");
