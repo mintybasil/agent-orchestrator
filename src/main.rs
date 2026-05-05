@@ -138,6 +138,7 @@ async fn main() {
         completed,
         workflow_steps,
         &current_exe,
+        cli.show_logs,
     )
     .await
     {

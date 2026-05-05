@@ -34,6 +34,7 @@ impl std::fmt::Display for EventKey {
 /// data_root is the base data/ directory (e.g. PathBuf::from("data")).
 /// token is the GitHub token used for authenticating git operations.
 /// current_exe is the path to this binary, used as GIT_ASKPASS helper.
+/// show_logs controls whether harness output is also printed to the terminal.
 #[instrument(skip(data_root, steps, token, current_exe))]
 pub async fn run_event(
     key: &EventKey,
@@ -41,6 +42,7 @@ pub async fn run_event(
     steps: &[Step],
     token: &str,
     current_exe: &Path,
+    show_logs: bool,
 ) -> Result<()> {
     let issue_dir = data_root
         .join(&key.owner)
@@ -73,10 +75,12 @@ pub async fn run_event(
 
     for (idx, step) in steps.iter().enumerate() {
         let error_path = issue_dir.join(format!("step_{:02}_{}.error", idx, step.name));
+        let log_path = issue_dir.join(format!("step_{:02}_{}.log", idx, step.name));
 
         run_step(
             step,
             &error_path,
+            &log_path,
             &vars,
             token,
             current_exe,
@@ -93,6 +97,7 @@ pub async fn run_event(
 async fn run_step(
     step: &Step,
     error_path: &Path,
+    log_path: &Path,
     vars: &HashMap<&str, String>,
     token: &str,
     current_exe: &Path,
@@ -119,6 +124,10 @@ async fn run_step(
             &rendered_prompt,
             error_path,
             &key.to_string(),
+            &crate::harness::LogConfig {
+                log_path: log_path.into(),
+                show_logs,
+            },
         )
         .await?;
 
