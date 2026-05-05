@@ -51,11 +51,6 @@ async fn main() {
     let total_triggers: usize = configs.iter().map(|c| c.triggers.len()).sum();
     let total_steps: usize = configs.iter().map(|c| c.steps.len()).sum();
     let total_repos: usize = configs.iter().map(|c| c.repos.len()).sum();
-    let min_poll = configs
-        .iter()
-        .map(|c| c.poll_interval_secs)
-        .min()
-        .unwrap_or(0);
 
     // Use the compact formatter so span fields (profile, issue, step_name)
     // appear on every event line, making it easy to tell which issue
@@ -138,7 +133,7 @@ async fn main() {
         total_repos,
         total_triggers,
         total_steps,
-        min_poll,
+        cli.interval,
         concurrency_msg,
         data_root.display()
     );
@@ -153,6 +148,7 @@ async fn main() {
         &current_exe,
         cli.show_logs,
         cli.limit,
+        cli.interval,
     )
     .await
     {

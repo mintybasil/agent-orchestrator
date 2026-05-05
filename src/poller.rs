@@ -19,6 +19,7 @@ struct FailedEntry {
     error: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_poll_loop(
     configs: Vec<Config>,
     token: String,
@@ -27,6 +28,7 @@ pub async fn run_poll_loop(
     current_exe: &Path,
     show_logs: bool,
     concurrency_limit: usize,
+    poll_interval_secs: u64,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -50,24 +52,16 @@ pub async fn run_poll_loop(
             let steps = Arc::new(config.steps.clone());
             let repos = config.repos.clone();
             let git_config = config.git.clone();
-            let poll_interval = config.poll_interval_secs;
             WorkflowEntry {
                 triggers,
                 steps,
                 repos,
                 git_config,
-                poll_interval_secs: poll_interval,
             }
         })
         .collect();
 
-    // Use the shortest poll interval across all workflows as the tick rate.
-    let min_interval = workflow_entries
-        .iter()
-        .map(|w| w.poll_interval_secs)
-        .min()
-        .unwrap_or(60);
-    let mut ticker = interval(Duration::from_secs(min_interval));
+    let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
     loop {
         ticker.tick().await;
@@ -215,7 +209,6 @@ struct WorkflowEntry {
     steps: Arc<Vec<workflow::Step>>,
     repos: Vec<crate::config::RepoConfig>,
     git_config: crate::config::GitConfig,
-    poll_interval_secs: u64,
 }
 
 /// Append a key to completed.json (read-modify-write the JSON array).

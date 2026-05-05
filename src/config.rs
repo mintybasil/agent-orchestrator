@@ -42,8 +42,6 @@ impl Default for GitConfig {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
-    pub poll_interval_secs: u64,
-
     /// Trigger configuration — what initiates workflow runs.
     /// Empty vec is allowed at deserialization but rejected by Config::load.
     #[serde(default)]
@@ -140,6 +138,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 0)]
     pub limit: usize,
 
+    /// Poll interval in seconds. How often to check for new events.
+    #[arg(long, default_value_t = 60)]
+    pub interval: u64,
+
     #[arg(long, value_name = "DIR")]
     pub data_dir: Option<std::path::PathBuf>,
 
@@ -191,10 +193,22 @@ mod tests {
     }
 
     #[test]
+    fn interval_defaults_to_60() {
+        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", "."]).unwrap();
+        assert_eq!(cli.interval, 60, "default interval should be 60 seconds");
+    }
+
+    #[test]
+    fn explicit_interval_is_respected() {
+        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", ".", "--interval", "30"])
+            .unwrap();
+        assert_eq!(cli.interval, 30);
+    }
+
+    #[test]
     fn explicit_trigger_deserializes() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -238,7 +252,6 @@ harness = { type = "hermes", profile = "cto" }
     fn no_triggers_errors() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[repos]]
 owner = "o"
@@ -264,7 +277,6 @@ harness = { type = "hermes", profile = "cto" }
         use std::io::Write;
         // Use an unknown hook variant to trigger a TOML deserialization error
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -299,7 +311,6 @@ path = "{{output_path}}"
     fn git_config_defaults() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -327,7 +338,6 @@ harness = { type = "hermes", profile = "cto" }
     fn git_worktree_requires_clone() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [git]
 clone = false
@@ -361,7 +371,6 @@ harness = { type = "hermes", profile = "cto" }
     fn both_trigger_types_deserialize() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -403,7 +412,6 @@ harness = { type = "hermes", profile = "cto" }
     fn load_all_discovers_toml_files() {
         let dir = tempfile::tempdir().unwrap();
         let toml_content = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"

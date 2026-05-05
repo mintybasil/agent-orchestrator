@@ -9,7 +9,7 @@ configured user and runs a multi-step agent workflow against each one using
 1. On each poll tick the daemon calls the GitHub Issues API for every configured
    repo, filtering by assignee and `state=open`.
 2. New issues (not yet completed or in-flight) are dispatched concurrently as
-   tokio tasks.
+   tokio tasks, gated by an optional concurrency limit.
 3. Each issue runs through the configured workflow steps sequentially by invoking
    `hermes chat` as a subprocess with a rendered prompt.
 4. Step outputs are written to `<data-dir>/{owner}/{repo}/{issue_number}/` and
@@ -34,12 +34,17 @@ The binary is at `target/release/agent-orchestrator`.
 
 ## Configuration
 
-Copy `config.example.toml` to `config.toml` and edit it:
+Place one or more `.toml` workflow config files in a directory and point
+`agent-orchestrator` at it with `--workflows`. Each file is loaded as an
+independent workflow.
+
+Copy `config.example.toml` into your workflows directory and edit it:
 
 ```toml
-poll_interval_secs = 60
+[[triggers]]
+type = "github_issue_assigned"
 assigned_to = "your-github-username"
-allowed_issue_creators = ["your-github-username"]
+allowed_users = ["your-github-username"]
 
 [[repos]]
 owner = "your-org"
@@ -48,12 +53,21 @@ repo  = "your-repo"
 [[steps]]
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
-profile = "cto"
+harness = { type = "hermes", profile = "cto" }
 
 [[steps]]
 name = "implement"
-prompt_template = "Read the triage at {{step_0_output}}. Implement the changes described. Write a summary to {{output_path}}/implement.md."
-profile = "cto"
+prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary to {{output_path}}/step_01_implement.md."
+harness = { type = "hermes", profile = "cto" }
+```
+
+### Git configuration
+
+```toml
+[git]
+clone = true           # Clone/pull the repo (default: true)
+worktree = false       # Per-issue worktrees (default: false; requires clone = true)
+default_branch = "main" # Branch for pull/worktree (default: "main")
 ```
 
 ### Step fields
@@ -62,17 +76,14 @@ profile = "cto"
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `profile` | string | yes | Hermes profile passed via `--profile` |
-| `worktree` | bool | no | When `true`, passes `--worktree` to hermes (default: `false`) |
-| `provider` | string | no | Passed to hermes via `--provider` |
-| `model` | string | no | Passed to hermes via `--model` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model` |
 
 ### Hermes invocation
 
 Each step runs:
 
 ```
-hermes chat -p <prompt> --yolo --quiet --profile <profile> [--worktree] [--provider <provider>] [--model <model>]
+hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>]
 ```
 
 ### Template placeholders
@@ -83,7 +94,7 @@ hermes chat -p <prompt> --yolo --quiet --profile <profile> [--worktree] [--provi
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
 | `{{output_path}}` | Full path where this step must write its output (under `<data-dir>/{owner}/{repo}/{issue_number}/`) |
-| `{{step_N_output}}` | Full path to step N's output file (0-indexed; for chaining steps) |
+| `{{repo_path}}` | Path to the base repo clone; empty when `git.clone = false` |
 
 ### Hooks
 
@@ -115,19 +126,27 @@ type = "push_code"
 
 ```
 export GITHUB_TOKEN=***
-./target/release/agent-orchestrator --config config.toml
+./target/release/agent-orchestrator --workflows /path/to/workflows/
 ```
 
-The `--config` flag defaults to `config.toml` in the current directory.
-Use `--data-dir <DIR>` to override the default data directory (`~/.agent-orchestrator`).
-Use `--show-logs` to print harness agent stdout/stderr to the terminal in addition to writing them to log files in the data directory. Log files are always written regardless of this flag.
+### CLI flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--workflows <DIR>` | `.` | Directory containing workflow `.toml` files |
+| `--limit <N>` | `0` | Max concurrent workflow runs (0 = unlimited) |
+| `--interval <SECS>` | `60` | Poll interval in seconds |
+| `--data-dir <DIR>` | `~/.agent-orchestrator` | Data directory for logs and state |
+| `--show-logs` | off | Print harness stdout/stderr to terminal in addition to log files |
+
 The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
 
 On startup the daemon validates:
 
-- The config file is readable and parses correctly.
+- The workflows directory contains at least one `.toml` file.
+- All config files parse correctly and define at least one trigger and one step.
 - `GITHUB_TOKEN` is set and non-empty.
-- The data directory (`--data-dir`, default `~/.agent-orchestrator`) exists or can be created, and is writable.
+- The data directory exists or can be created, and is writable.
 - `hermes` is present on `PATH`.
 
 Any validation failure exits with a descriptive error message.
@@ -138,10 +157,13 @@ Any validation failure exits with a descriptive error message.
 <data-dir>/
 ├── completed.json              # Array of "owner/repo/N" keys
 ├── failed.json                # Array of {key, timestamp, error} objects
-└── {owner}/{repo}/{issue_number}/
-    ├── step_NN_<name>.log      # Full harness stdout+stderr log (always written)
-    ├── step_NN_<name>.error   # stderr on failure only
-    └── step_NN_<name>.md      # Step output files written by hermes
+└── {owner}/{repo}/
+    ├── repo/                  # git clone of the repo (when git.clone = true)
+    └── {issue_number}/
+        ├── worktree-{N}/        # per-issue git worktree (when git.worktree = true)
+        ├── step_NN_<name>.log   # Full harness stdout+stderr log (always written)
+        ├── step_NN_<name>.error # stderr on failure only
+        └── step_NN_<name>.md    # Step output files written by hermes
 ```
 
 ## Environment variables

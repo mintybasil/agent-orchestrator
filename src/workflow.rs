@@ -30,8 +30,7 @@ mod tests {
     /// Helper: parse a Config from a TOML string with boilerplate headers.
     fn parse_config(steps_toml: &str) -> anyhow::Result<Config> {
         let full = format!(
-            "poll_interval_secs = 60\n\
-             [[triggers]]\n\
+            "[[triggers]]\n\
              type = \"github_issue_assigned\"\n\
              assigned_to = \"test\"\n\
              allowed_users = [\"test\"]\n\n\
@@ -141,8 +140,6 @@ harness = { type = "hermes", profile = "cto" }
         // We need valid triggers but empty steps
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
-
 [[triggers]]
 type = "github_issue_assigned"
 assigned_to = "test"

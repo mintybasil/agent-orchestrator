@@ -30,7 +30,7 @@ cargo check
 src/
   main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
   askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
-  config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit flags); includes GitConfig
+  config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
   git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
@@ -213,7 +213,7 @@ To run additional workflows, add more `.toml` files to the `--workflows`
 directory. Each file is loaded as an independent workflow config:
 
 ```bash
-agent-orchestrator --workflows /path/to/workflows/ --limit 4
+agent-orchestrator --workflows /path/to/workflows/ --limit 4 --interval 30
 ```
 
 ### Git config format
@@ -298,6 +298,7 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 - `<data-dir>` must be writable (validated on startup, hard exit if not); override with `--data-dir` (default: `~/.agent-orchestrator`).
 - `--workflows` directory must contain at least one `.toml` file (validated on startup, hard exit if not).
 - `--limit` caps concurrent workflow runs; 0 means unlimited (default).
+- `--interval` sets the poll interval in seconds; defaults to 60.
 - `--show-logs` flag: when set, harness output is printed to the terminal in addition to being written to log files. Log files are always written.
 
 ## Debugging a failed issue
