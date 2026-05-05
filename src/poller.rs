@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, interval};
+use tokio::sync::Semaphore;
 
 use crate::config::Config;
 use crate::runner::{EventKey, run_event};
@@ -19,156 +20,205 @@ struct FailedEntry {
 }
 
 pub async fn run_poll_loop(
-    config: Config,
+    configs: Vec<Config>,
     token: String,
     data_root: &Path,
     completed: Arc<Mutex<HashSet<String>>>,
-    workflow_steps: Vec<workflow::Step>,
     current_exe: &Path,
     show_logs: bool,
+    concurrency_limit: usize,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let file_lock: Arc<std::sync::Mutex<()>> = Arc::new(std::sync::Mutex::new(()));
-    let mut ticker = interval(Duration::from_secs(config.poll_interval_secs));
-    let workflow_steps = Arc::new(workflow_steps);
 
-    // Build triggers from config
-    let triggers: Vec<Box<dyn Trigger + Send>> =
-        config.triggers.iter().map(|tc| tc.build()).collect();
+    // When limit is 0, treat as unlimited. Use a large semaphore permit count
+    // (usize::MAX) so acquisition never blocks.
+    let semaphore = Arc::new(Semaphore::new(if concurrency_limit == 0 {
+        usize::MAX
+    } else {
+        concurrency_limit
+    }));
 
-    let repos = config.repos.clone();
+    // Pre-build triggers and step lists per config so we don't re-parse
+    // trigger configs every tick.
+    let workflow_entries: Vec<WorkflowEntry> = configs
+        .into_iter()
+        .map(|config| {
+            let triggers: Vec<Box<dyn Trigger + Send>> =
+                config.triggers.iter().map(|tc| tc.build()).collect();
+            let steps = Arc::new(config.steps.clone());
+            let repos = config.repos.clone();
+            let git_config = config.git.clone();
+            let poll_interval = config.poll_interval_secs;
+            WorkflowEntry {
+                triggers,
+                steps,
+                repos,
+                git_config,
+                poll_interval_secs: poll_interval,
+            }
+        })
+        .collect();
+
+    // Use the shortest poll interval across all workflows as the tick rate.
+    let min_interval = workflow_entries
+        .iter()
+        .map(|w| w.poll_interval_secs)
+        .min()
+        .unwrap_or(60);
+    let mut ticker = interval(Duration::from_secs(min_interval));
 
     loop {
         ticker.tick().await;
 
-        for trigger in &triggers {
-            tracing::debug!(
-                "poll tick: trigger={}, checking {} repos",
-                trigger.name(),
-                repos.len()
-            );
+        for entry in &workflow_entries {
+            for trigger in &entry.triggers {
+                tracing::debug!(
+                    "poll tick: trigger={}, checking {} repos",
+                    trigger.name(),
+                    entry.repos.len()
+                );
 
-            let events = match trigger.poll(&repos, &token).await {
-                Ok(events) => events,
-                Err(e) => {
-                    tracing::error!("trigger {} poll failed: {}", trigger.name(), e);
-                    continue;
-                }
-            };
-
-            for event in events {
-                // Build dedup key from owner/repo/event_key
-                let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
-
-                // Parse the issue number from the event key
-                let issue_number: u64 = match event.key.parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        tracing::warn!("trigger event key is not a number: {}", event.key);
+                let events = match trigger.poll(&entry.repos, &token).await {
+                    Ok(events) => events,
+                    Err(e) => {
+                        tracing::error!("trigger {} poll failed: {}", trigger.name(), e);
                         continue;
                     }
                 };
 
-                let event_key = EventKey {
-                    owner: event.owner.clone(),
-                    repo: event.repo.clone(),
-                    number: issue_number,
-                    label: event.label.clone(),
-                    variables: event.variables.clone(),
-                };
+                for event in events {
+                    // Build dedup key from owner/repo/event_key
+                    let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
 
-                // Skip if completed
-                if completed
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .contains(&key_str)
-                {
-                    continue;
-                }
-                // Skip if permanently failed this run
-                if permanently_failed
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .contains(&key_str)
-                {
-                    continue;
-                }
-                // Skip if in-flight
-                if in_flight
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .contains(&key_str)
-                {
-                    continue;
-                }
+                    // Parse the issue number from the event key
+                    let issue_number: u64 = match event.key.parse() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            tracing::warn!("trigger event key is not a number: {}", event.key);
+                            continue;
+                        }
+                    };
 
-                // Mark in-flight and spawn
-                in_flight
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(key_str.clone());
-                tracing::info!("[{}] dispatching workflow", event_key);
+                    let event_key = EventKey {
+                        owner: event.owner.clone(),
+                        repo: event.repo.clone(),
+                        number: issue_number,
+                        label: event.label.clone(),
+                        variables: event.variables.clone(),
+                    };
 
-                let completed_clone = Arc::clone(&completed);
-                let in_flight_clone = Arc::clone(&in_flight);
-                let permanently_failed_clone = Arc::clone(&permanently_failed);
-                let file_lock_clone = Arc::clone(&file_lock);
-                let data_root_clone = data_root.to_path_buf();
-                let key_str_clone = key_str.clone();
-                let token_clone = token.clone();
-                let current_exe_clone = current_exe.to_path_buf();
-                let show_logs_clone = show_logs;
-                let failed_path = data_root.join("failed.json");
-                let completed_path = data_root.join("completed.json");
-                let steps_clone = Arc::clone(&workflow_steps);
-                let git_config_clone = config.git.clone();
-
-                tokio::spawn(async move {
-                    let result = run_event(
-                        &event_key,
-                        &data_root_clone,
-                        &steps_clone,
-                        &token_clone,
-                        &current_exe_clone,
-                        show_logs_clone,
-                        &git_config_clone,
-                    )
-                    .await;
-                    in_flight_clone
+                    // Skip if completed
+                    if completed
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
-                        .remove(&key_str_clone);
-
-                    match result {
-                        Ok(()) => {
-                            tracing::info!("[{}] workflow completed", event_key);
-                            // Add to completed set and persist
-                            completed_clone
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(key_str_clone.clone());
-                            append_completed(&completed_path, &key_str_clone, &file_lock_clone);
-                        }
-                        Err(e) => {
-                            tracing::error!("[{}] workflow FAILED: {}", event_key, e);
-                            // Prevent re-dispatch within this daemon run (in-memory only)
-                            permanently_failed_clone
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(key_str_clone.clone());
-                            append_failed(
-                                &failed_path,
-                                &key_str_clone,
-                                &e.to_string(),
-                                &file_lock_clone,
-                            );
-                        }
+                        .contains(&key_str)
+                    {
+                        continue;
                     }
-                });
+                    // Skip if permanently failed this run
+                    if permanently_failed
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .contains(&key_str)
+                    {
+                        continue;
+                    }
+                    // Skip if in-flight
+                    if in_flight
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .contains(&key_str)
+                    {
+                        continue;
+                    }
+
+                    // Mark in-flight and spawn
+                    in_flight
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(key_str.clone());
+                    tracing::info!("[{}] dispatching workflow", event_key);
+
+                    let completed_clone = Arc::clone(&completed);
+                    let in_flight_clone = Arc::clone(&in_flight);
+                    let permanently_failed_clone = Arc::clone(&permanently_failed);
+                    let file_lock_clone = Arc::clone(&file_lock);
+                    let data_root_clone = data_root.to_path_buf();
+                    let key_str_clone = key_str.clone();
+                    let token_clone = token.clone();
+                    let current_exe_clone = current_exe.to_path_buf();
+                    let show_logs_clone = show_logs;
+                    let failed_path = data_root.join("failed.json");
+                    let completed_path = data_root.join("completed.json");
+                    let steps_clone = Arc::clone(&entry.steps);
+                    let git_config_clone = entry.git_config.clone();
+                    let sem_clone = Arc::clone(&semaphore);
+
+                    tokio::spawn(async move {
+                        // Acquire semaphore permit — blocks if at capacity.
+                        let _permit = sem_clone
+                            .acquire()
+                            .await
+                            .expect("semaphore not closed");
+
+                        let result = run_event(
+                            &event_key,
+                            &data_root_clone,
+                            &steps_clone,
+                            &token_clone,
+                            &current_exe_clone,
+                            show_logs_clone,
+                            &git_config_clone,
+                        )
+                        .await;
+                        // Permit dropped here, freeing a slot.
+
+                        in_flight_clone
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&key_str_clone);
+
+                        match result {
+                            Ok(()) => {
+                                tracing::info!("[{}] workflow completed", event_key);
+                                // Add to completed set and persist
+                                completed_clone
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(key_str_clone.clone());
+                                append_completed(&completed_path, &key_str_clone, &file_lock_clone);
+                            }
+                            Err(e) => {
+                                tracing::error!("[{}] workflow FAILED: {}", event_key, e);
+                                // Prevent re-dispatch within this daemon run (in-memory only)
+                                permanently_failed_clone
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(key_str_clone.clone());
+                                append_failed(
+                                    &failed_path,
+                                    &key_str_clone,
+                                    &e.to_string(),
+                                    &file_lock_clone,
+                                );
+                            }
+                        }
+                    });
+                }
             }
         }
     }
+}
+
+/// Pre-processed workflow entry used inside the poll loop.
+struct WorkflowEntry {
+    triggers: Vec<Box<dyn Trigger + Send>>,
+    steps: Arc<Vec<workflow::Step>>,
+    repos: Vec<crate::config::RepoConfig>,
+    git_config: crate::config::GitConfig,
+    poll_interval_secs: u64,
 }
 
 /// Append a key to completed.json (read-modify-write the JSON array).

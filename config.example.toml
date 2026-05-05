@@ -1,3 +1,9 @@
+# Place this file in a directory and point agent-orchestrator at it with --workflows:
+#   agent-orchestrator --workflows /path/to/directory --limit 4
+#
+# All .toml files in the directory are loaded as separate workflow configs.
+# --limit caps the number of concurrent workflow runs (0 = unlimited).
+#
 poll_interval_secs = 60
 
 # ── Git configuration ─────────────────────────────────────────────────

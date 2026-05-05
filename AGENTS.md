@@ -30,13 +30,13 @@ cargo check
 src/
   main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
   askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
-  config.rs     -- Config struct (TOML) + clap CLI (--config flag); includes GitConfig
+  config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit flags); includes GitConfig
   git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
-  poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, JSON persistence
+  poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
   template.rs   -- {{key}} placeholder renderer + unit tests
   trigger.rs    -- Generalized trigger trait + TriggerConfig enum
@@ -164,6 +164,11 @@ only.
 issues (they are only retried on daemon restart, per spec). Both sets and
 `completed: HashSet<String>` are wrapped in `Arc<Mutex<_>>`.
 
+A `tokio::sync::Semaphore` (permit count from `--limit`) caps the number of
+concurrent workflow runs across all workflows. When `--limit` is 0 (default),
+the semaphore is effectively unlimited. Each spawned task acquires a permit
+before executing; the permit is held until the task completes.
+
 **File write safety**: `completed.json` and `failed.json` are protected by a
 shared `file_lock: Arc<Mutex<()>>`. Writes are atomic: content is written to
 a `.tmp` file then renamed into place.
@@ -204,9 +209,12 @@ Before the first step runs, the orchestrator clones the target repo into
 Workflow steps live in your config file as `[[steps]]` tables — no recompile
 needed. Edit the config and restart the daemon.
 
-To run a different workflow, run a separate daemon instance pointing at a
-different config file:
-`agent-orchestrator --config other-config.toml`
+To run additional workflows, add more `.toml` files to the `--workflows`
+directory. Each file is loaded as an independent workflow config:
+
+```bash
+agent-orchestrator --workflows /path/to/workflows/ --limit 4
+```
 
 ### Git config format
 
@@ -288,7 +296,8 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 - `GITHUB_TOKEN` env var must be set (validated on startup, hard exit if missing).
 - `hermes` must be on `PATH` (validated on startup, hard exit if missing).
 - `<data-dir>` must be writable (validated on startup, hard exit if not); override with `--data-dir` (default: `~/.agent-orchestrator`).
-- Config file must be readable TOML (validated on startup, hard exit if not).
+- `--workflows` directory must contain at least one `.toml` file (validated on startup, hard exit if not).
+- `--limit` caps concurrent workflow runs; 0 means unlimited (default).
 - `--show-logs` flag: when set, harness output is printed to the terminal in addition to being written to log files. Log files are always written.
 
 ## Debugging a failed issue
