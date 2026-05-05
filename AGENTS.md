@@ -63,11 +63,11 @@ default_branch = "main" # Branch for git pull and worktree creation (default: "m
 When `git.worktree = true`, the orchestrator creates a fresh git worktree for
 each issue before running steps, and cleans it up afterward:
 
-1. **Before steps**: `git worktree add` creates `<data-dir>/<owner>/<repo>/<issue_number>/worktree-<N>`
+1. **Before steps**: `git worktree add -b <branch> <path> <default_branch>` creates a unique branch (`ao/<event-label>-<timestamp>`) and checks it out at `<data-dir>/<owner>/<repo>/<issue_number>/worktree-<N>`. Each worktree gets its own branch to avoid git's restriction against multiple checkouts of the same branch.
 2. **After steps**: cleanup runs:
    - If uncommitted changes exist → error, worktree left for manual inspection
-   - If unpushed commits exist → push them, then remove worktree
-   - If clean → remove worktree with `git worktree remove --force`
+   - If unpushed commits exist → push them, then remove worktree + delete branch
+   - If clean → remove worktree with `git worktree remove --force` and delete the branch with `git branch -D`
 
 ### Triggers
 

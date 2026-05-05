@@ -4,6 +4,7 @@ use crate::hooks;
 use crate::template::render;
 use crate::workflow::Step;
 use anyhow::Result;
+use chrono::Utc;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -99,20 +100,30 @@ pub async fn run_event(
     };
 
     // If worktree is enabled, create a fresh worktree inside the workspace dir.
-    let worktree_path = if git_config.worktree {
+    let worktree_info = if git_config.worktree {
         let repo = repo_dir.as_ref().ok_or_else(|| {
             anyhow::anyhow!("git.worktree requires a repo (git.clone must be true)")
         })?;
+        // Generate a unique branch name to avoid collisions with the main
+        // checkout and across parallel/failed runs.  The `key` (e.g. "acme/project#42")
+        // is already unique per-event, and the timestamp adds extra uniqueness
+        // for re-runs of the same event after a prior failure.
+        let branch_name = format!(
+            "ao/{}-{}",
+            key.label.replace(['/', '#'], "-"),
+            Utc::now().timestamp()
+        );
         let wt_name = format!("worktree-{}", key.number);
         let wt_path = workspace_dir.join(&wt_name);
         git::create_worktree(
             repo,
             &wt_path,
             &git_config.default_branch,
+            &branch_name,
             token,
             current_exe,
         )?;
-        Some(wt_path)
+        Some((wt_path, branch_name))
     } else {
         None
     };
@@ -121,8 +132,9 @@ pub async fn run_event(
     // - worktree path if worktree is enabled
     // - repo path if clone is enabled but no worktree
     // - event workspace directory otherwise
-    let harness_work_dir = worktree_path
-        .clone()
+    let harness_work_dir = worktree_info
+        .as_ref()
+        .map(|(wt_path, _)| wt_path.clone())
         .or_else(|| repo_dir.clone())
         .unwrap_or_else(|| workspace_dir.clone());
 
@@ -165,11 +177,12 @@ pub async fn run_event(
     let result = run_steps(steps, &ctx).await;
 
     // Clean up worktree if one was created.
-    if let Some(ref wt_path) = worktree_path {
+    if let Some((ref wt_path, ref branch_name)) = worktree_info {
         let repo = repo_dir.as_ref().unwrap();
         if let Err(cleanup_err) = cleanup_worktree(
             repo,
             wt_path,
+            branch_name,
             token,
             current_exe,
             &git_config.default_branch,
@@ -265,10 +278,11 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 /// Per the spec:
 /// - If there are uncommitted changes, error and LEAVE the worktree.
 /// - If there are unpushed commits, push them. Error if push fails (leave worktree).
-/// - If clean and pushed, remove the worktree.
+/// - If clean and pushed, remove the worktree and delete its branch.
 fn cleanup_worktree(
     repo_path: &Path,
     worktree_path: &Path,
+    branch_name: &str,
     token: &str,
     current_exe: &Path,
     default_branch: &str,
@@ -287,5 +301,31 @@ fn cleanup_worktree(
     }
 
     // Safe to remove — clean and pushed.
-    git::remove_worktree(repo_path, worktree_path, token, current_exe)
+    git::remove_worktree(repo_path, worktree_path, branch_name, token, current_exe)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn branch_name_sanitizes_slashes_and_hashes() {
+        // Event labels like "acme/project#42" must become valid git branch names.
+        let label = "acme/project#42";
+        let sanitized = label.replace(['/', '#'], "-");
+        assert!(!sanitized.contains('/'));
+        assert!(!sanitized.contains('#'));
+        assert_eq!(sanitized, "acme-project-42");
+    }
+
+    #[test]
+    fn branch_name_format_is_valid() {
+        // Verify the branch name format "ao/<label>-<ts>" produces valid git branch names.
+        let label = "owner-repo-42";
+        let ts: i64 = 1746475200; // deterministic timestamp for test
+        let branch = format!("ao/{}-{}", label, ts);
+        assert!(branch.starts_with("ao/"));
+        assert_eq!(branch, "ao/owner-repo-42-1746475200");
+        // Git branch names cannot contain spaces, control chars, or certain special chars.
+        // The ao/ prefix and sanitized label + timestamp should be safe.
+        assert!(!branch.contains(' '));
+    }
 }
