@@ -30,14 +30,14 @@ cargo check
 src/
   main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
   askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
-  config.rs     -- Config struct (TOML) + clap CLI (--config flag)
-  git.rs        -- Git workspace management: clone/pull with ASKPASS auth
+  config.rs     -- Config struct (TOML) + clap CLI (--config flag); includes GitConfig
+  git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, JSON persistence
-  runner.rs     -- Per-issue sequential step executor (uses Harness + hooks)
+  runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
   template.rs   -- {{key}} placeholder renderer + unit tests
   trigger.rs    -- Generalized trigger trait + TriggerConfig enum
   workflow.rs   -- Step type (harness-agnostic; harness-specific options live in HarnessConfig)
@@ -46,6 +46,28 @@ data/                -- Runtime data dir (gitignored); created on first run
 ```
 
 ## Architecture (v0.2)
+
+### Git configuration (GitConfig)
+
+Git behavior is controlled by the `[git]` config section:
+
+```toml
+[git]
+clone = true           # Whether to clone/pull the repo (default: true)
+worktree = false       # Whether to create a per-issue worktree (default: false)
+default_branch = "main" # Branch for git pull and worktree creation (default: "main")
+```
+
+**Validation**: `worktree = true` requires `clone = true` (enforced on startup).
+
+When `git.worktree = true`, the orchestrator creates a fresh git worktree for
+each issue before running steps, and cleans it up afterward:
+
+1. **Before steps**: `git worktree add` creates `<data-dir>/<owner>/<repo>/<issue_number>/worktree-<N>`
+2. **After steps**: cleanup runs:
+   - If uncommitted changes exist → error, worktree left for manual inspection
+   - If unpushed commits exist → push them, then remove worktree
+   - If clean → remove worktree with `git worktree remove --force`
 
 ### Triggers
 
@@ -76,8 +98,12 @@ Harnesses define **which agent backend runs a step**. They implement the
 
 Each `HarnessConfig` variant carries **harness-specific options** — the Step
 struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
-`profile`, `worktree`, `provider`, and `model` because those are hermes CLI
-flags, not generic step concerns.
+`profile`, `provider`, and `model` because those are hermes CLI flags, not
+generic step concerns.
+
+**Note**: Worktree management is handled by the orchestrator (via `[git]`
+config), not by individual harness steps. The `--worktree` flag has been removed
+from the hermes harness.
 
 Currently supported:
 - `hermes` — invokes the hermes CLI agent
@@ -90,22 +116,23 @@ Adding a new harness:
 
 ## Data directory layout
 
-Each monitored repo gets a workspace directory under the data dir:
+Each monitored repo gets a directory under the data dir:
 
 ```
 {data-dir}/
   {owner}/{repo}/
-    workspace/           -- git clone of the repo (auto-managed)
+    repo/                -- git clone of the repo (auto-managed, when git.clone = true)
     {issue_number}/      -- per-issue output directory
+      worktree-{N}/        -- per-issue git worktree (when git.worktree = true)
       step_NN_<name>.log   -- full harness stdout+stderr log
       step_NN_<name>.error -- stderr on failure only
   completed.json         -- set of completed issue keys
   failed.json            -- list of failed issue entries
 ```
 
-Before each workflow run, the orchestrator ensures the workspace exists:
-- **First run**: `git clone` into the workspace directory using `GIT_ASKPASS` for authentication
-- **Subsequent runs**: `git pull origin main` to update to latest (also via `GIT_ASKPASS`)
+Before each workflow run, the orchestrator ensures the repo exists:
+- **First run**: `git clone` into the `repo/` directory using `GIT_ASKPASS` for authentication
+- **Subsequent runs**: `git pull origin <default_branch>` to update to latest (also via `GIT_ASKPASS`)
 
 ### Git authentication (GIT_ASKPASS)
 
@@ -161,14 +188,16 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 | `--yolo` | hardcoded | always |
 | `--quiet` | hardcoded | always |
 | `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
-| `--worktree` | `worktree = true` in HarnessConfig::Hermes | optional |
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
 | `--model <name>` | `model` field in HarnessConfig::Hermes | optional |
 
+The working directory for the harness invocation depends on `[git]` config:
+- **worktree = true**: invoked from the per-issue worktree directory
+- **clone = true, worktree = false**: invoked from the repo checkout (`repo/`)
+- **clone = false**: invoked from the per-issue output directory
+
 Before the first step runs, the orchestrator clones the target repo into
-`<data-dir>/<owner>/<repo>/workspace/` (or pulls latest `main` if it already
-exists). The hermes harness is invoked from inside that `workspace/` directory
-so it treats the repo as its project root.
+`<data-dir>/<owner>/<repo>/repo/` (or pulls latest if it already exists).
 
 ## Extending the workflow
 
@@ -178,6 +207,15 @@ needed. Edit the config and restart the daemon.
 To run a different workflow, run a separate daemon instance pointing at a
 different config file:
 `agent-orchestrator --config other-config.toml`
+
+### Git config format
+
+```toml
+[git]
+clone = true           # Whether to clone/pull the repo (default: true)
+worktree = false       # Per-issue worktrees (default: false; requires clone = true)
+default_branch = "main" # Branch for pull/worktree (default: "main")
+```
 
 ### Trigger format
 
@@ -199,7 +237,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes", profile = "cto", worktree = true, provider = "openai", model = "o3" }
+# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3" }
 
 # Optional pre-hooks (run before the agent harness)
 [[steps.pre_hooks]]
@@ -225,7 +263,8 @@ type = "push_code"
 | `{{repo}}` | Repository name |
 | `{{issue_number}}` | GitHub issue number |
 | `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
-| `{{workspace}}` | Path to the git clone of the repo (`<data-dir>/<owner>/<repo>/workspace/`), auto-managed by the orchestrator |
+| `{{workspace}}` | Backwards-compatible alias: path to the repo clone when `git.clone = true`, otherwise the output directory |
+| `{{repo_path}}` | Path to the base repository clone (`<data-dir>/<owner>/<repo>/repo/`); empty string when `git.clone = false` |
 
 ### Hook types
 

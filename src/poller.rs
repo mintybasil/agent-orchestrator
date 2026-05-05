@@ -122,6 +122,7 @@ pub async fn run_poll_loop(
                 let failed_path = data_root.join("failed.json");
                 let completed_path = data_root.join("completed.json");
                 let steps_clone = Arc::clone(&workflow_steps);
+                let git_config_clone = config.git.clone();
 
                 tokio::spawn(async move {
                     let result = run_event(
@@ -131,6 +132,7 @@ pub async fn run_poll_loop(
                         &token_clone,
                         &current_exe_clone,
                         show_logs_clone,
+                        &git_config_clone,
                     )
                     .await;
                     in_flight_clone

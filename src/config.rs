@@ -87,7 +87,7 @@ impl Config {
             path
         );
         anyhow::ensure!(
-            !(config.git.worktree && !config.git.clone),
+            !config.git.worktree || config.git.clone,
             "config {:?}: git.worktree requires git.clone to be true",
             path
         );
