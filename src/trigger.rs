@@ -15,7 +15,6 @@ pub struct TriggerEvent {
     /// Opaque identifier for dedup (e.g. "42" for an issue number).
     pub key: String,
     /// Human-readable label for logging.
-    #[allow(dead_code)]
     pub label: String,
     /// Trigger-specific template variables (e.g. "issue_number" for issues,
     /// "pr_number" for PR reviews). These are merged with global variables
