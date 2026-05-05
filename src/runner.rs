@@ -105,7 +105,13 @@ pub async fn run_event(
         })?;
         let wt_name = format!("worktree-{}", key.number);
         let wt_path = workspace_dir.join(&wt_name);
-        git::create_worktree(repo, &wt_path, &git_config.default_branch, token, current_exe)?;
+        git::create_worktree(
+            repo,
+            &wt_path,
+            &git_config.default_branch,
+            token,
+            current_exe,
+        )?;
         Some(wt_path)
     } else {
         None
@@ -170,7 +176,13 @@ pub async fn run_event(
     // Clean up worktree if one was created.
     if let Some(ref wt_path) = worktree_path {
         let repo = repo_dir.as_ref().unwrap();
-        if let Err(cleanup_err) = cleanup_worktree(repo, wt_path, token, current_exe, &git_config.default_branch) {
+        if let Err(cleanup_err) = cleanup_worktree(
+            repo,
+            wt_path,
+            token,
+            current_exe,
+            &git_config.default_branch,
+        ) {
             tracing::error!("worktree cleanup failed: {}", cleanup_err);
             // If the workflow itself succeeded, the cleanup error becomes the result.
             // If it already failed, keep the original error.
@@ -186,8 +198,12 @@ pub async fn run_event(
 /// Run all workflow steps sequentially.
 async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
     for (idx, step) in steps.iter().enumerate() {
-        let error_path = ctx.workspace_dir.join(format!("step_{:02}_{}.error", idx, step.name));
-        let log_path = ctx.workspace_dir.join(format!("step_{:02}_{}.log", idx, step.name));
+        let error_path = ctx
+            .workspace_dir
+            .join(format!("step_{:02}_{}.error", idx, step.name));
+        let log_path = ctx
+            .workspace_dir
+            .join(format!("step_{:02}_{}.log", idx, step.name));
 
         let step_ctx = StepContext {
             error_path,

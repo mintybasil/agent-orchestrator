@@ -200,7 +200,11 @@ pub fn remove_worktree(
 /// Check for uncommitted changes in the given directory.
 ///
 /// Returns `Ok(true)` if there are uncommitted changes, `Ok(false)` if clean.
-pub fn has_uncommitted_changes(work_dir: &Path, token: &str, current_exe: &Path) -> anyhow::Result<bool> {
+pub fn has_uncommitted_changes(
+    work_dir: &Path,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<bool> {
     let output = git_command(token, current_exe)
         .args(["diff-index", "--quiet", "HEAD", "--"])
         .current_dir(work_dir)
@@ -215,7 +219,12 @@ pub fn has_uncommitted_changes(work_dir: &Path, token: &str, current_exe: &Path)
 ///
 /// Returns `Ok(true)` if there are local commits not on the remote,
 /// `Ok(false)` if up-to-date.
-pub fn has_unpushed_commits(work_dir: &Path, default_branch: &str, token: &str, current_exe: &Path) -> anyhow::Result<bool> {
+pub fn has_unpushed_commits(
+    work_dir: &Path,
+    default_branch: &str,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<bool> {
     let upstream = format!("origin/{}", default_branch);
     let output = git_command(token, current_exe)
         .args(["log", &upstream, "..HEAD", "--oneline"])
@@ -242,7 +251,11 @@ pub fn push_commits(work_dir: &Path, token: &str, current_exe: &Path) -> anyhow:
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let scrubbed = scrub_credentials(&stderr);
-        anyhow::bail!("git push failed (exit code {:?}): {}", output.status.code(), scrubbed);
+        anyhow::bail!(
+            "git push failed (exit code {:?}): {}",
+            output.status.code(),
+            scrubbed
+        );
     }
 }
 
@@ -268,10 +281,7 @@ mod tests {
     #[test]
     fn repo_path_is_under_owner_repo() {
         let data_root = PathBuf::from("/tmp/test-data");
-        let repo_path = data_root
-            .join("zerokrab")
-            .join("bento-hancho")
-            .join("repo");
+        let repo_path = data_root.join("zerokrab").join("bento-hancho").join("repo");
         assert!(repo_path.starts_with(&data_root));
         assert!(repo_path.to_string_lossy().contains("repo"));
     }
