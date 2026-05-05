@@ -70,10 +70,7 @@ mod tests {
     #[test]
     fn repo_path_substitution() {
         let mut vars = HashMap::new();
-        vars.insert(
-            "repo_path".to_string(),
-            "/data/owner/repo/repo".to_string(),
-        );
+        vars.insert("repo_path".to_string(), "/data/owner/repo/repo".to_string());
         let result = render("Work in {{repo_path}} for this issue.", &vars);
         assert_eq!(result, "Work in /data/owner/repo/repo for this issue.");
     }
@@ -96,10 +93,7 @@ mod tests {
             ("owner".into(), "acme".to_string()),
             ("repo".into(), "project".to_string()),
             ("output_path".into(), "/data/acme/project/42".to_string()),
-            (
-                "repo_path".into(),
-                "/data/acme/project/repo".to_string(),
-            ),
+            ("repo_path".into(), "/data/acme/project/repo".to_string()),
         ]
         .into_iter()
         .collect();
