@@ -14,7 +14,6 @@ use tracing::Span;
 pub struct InvokeArgs {
     pub prompt: String,
     pub profile: String,
-    pub worktree: bool,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub error_file: PathBuf,
@@ -52,9 +51,6 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         .arg("--quiet")
         .arg("--profile")
         .arg(&args.profile);
-    if args.worktree {
-        cmd.arg("--worktree");
-    }
     if let Some(provider) = &args.provider {
         cmd.arg("--provider").arg(provider);
     }
@@ -164,11 +160,10 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
 
 /// Harness implementation for the hermes CLI agent.
 ///
-/// Carries hermes-specific options (profile, worktree, provider, model)
+/// Carries hermes-specific options (profile, provider, model)
 /// that were specified in the harness config, not on the generic Step.
 pub struct HermesHarness {
     pub profile: String,
-    pub worktree: bool,
     pub provider: Option<String>,
     pub model: Option<String>,
 }
@@ -190,7 +185,6 @@ impl Harness for HermesHarness {
         let args = InvokeArgs {
             prompt: rendered_prompt.to_string(),
             profile: self.profile.clone(),
-            worktree: self.worktree,
             provider: self.provider.clone(),
             model: self.model.clone(),
             error_file: error_path.to_path_buf(),
