@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tokio::time::{Duration, interval};
 use tokio::sync::Semaphore;
+use tokio::time::{Duration, interval};
 
 use crate::config::Config;
 use crate::runner::{EventKey, run_event};
@@ -158,10 +158,7 @@ pub async fn run_poll_loop(
 
                     tokio::spawn(async move {
                         // Acquire semaphore permit — blocks if at capacity.
-                        let _permit = sem_clone
-                            .acquire()
-                            .await
-                            .expect("semaphore not closed");
+                        let _permit = sem_clone.acquire().await.expect("semaphore not closed");
 
                         let result = run_event(
                             &event_key,
