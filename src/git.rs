@@ -1,8 +1,8 @@
+use crate::askpass;
 use anyhow::Context;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use crate::askpass;
+use tracing::instrument;
 
 /// Ensure a git workspace exists at `<data_root>/<owner>/<repo>/workspace`.
 ///
@@ -46,6 +46,7 @@ pub(crate) fn git_command(token: &str, current_exe: &Path) -> Command {
 }
 
 /// Clone a GitHub repository into `target_dir`.
+#[instrument(skip(token, current_exe))]
 fn clone_repo(
     owner: &str,
     repo: &str,
@@ -55,7 +56,7 @@ fn clone_repo(
 ) -> anyhow::Result<()> {
     let url = format!("https://github.com/{}/{}.git", owner, repo);
 
-    tracing::info!("[git] cloning {}/{} -> {:?}", owner, repo, target_dir);
+    tracing::info!("Cloning repo...");
 
     // Ensure parent directory exists
     if let Some(parent) = target_dir.parent() {
@@ -69,7 +70,7 @@ fn clone_repo(
         .context("failed to spawn git clone")?;
 
     if output.status.success() {
-        tracing::info!("[git] clone complete: {}/{}", owner, repo);
+        tracing::info!("Clone completed.");
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -88,8 +89,9 @@ fn clone_repo(
 ///
 /// Pull failure is non-fatal (logged as warning) — the workspace might be on
 /// a feature branch or have local changes.
+#[instrument(skip(token, current_exe))]
 fn pull_main(workspace: &Path, token: &str, current_exe: &Path) -> anyhow::Result<()> {
-    tracing::info!("[git] pulling origin main in {:?}", workspace);
+    tracing::info!("Pulling latest changes...");
 
     let output = git_command(token, current_exe)
         .args(["pull", "--quiet", "origin", "main"])
@@ -98,14 +100,13 @@ fn pull_main(workspace: &Path, token: &str, current_exe: &Path) -> anyhow::Resul
         .context("failed to spawn git pull")?;
 
     if output.status.success() {
-        tracing::info!("[git] pull complete");
+        tracing::info!("Pull complete");
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let scrubbed = scrub_credentials(&stderr);
         tracing::warn!(
-            "[git] git pull origin main failed in {:?} (exit code {:?}): {}; proceeding with existing checkout",
-            workspace,
+            "git pull failed (exit code {:?}): {}; proceeding with existing checkout",
             output.status.code(),
             scrubbed
         );
