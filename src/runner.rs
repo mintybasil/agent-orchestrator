@@ -111,7 +111,7 @@ async fn run_step(
     let harness = step.harness.build();
     let rendered_prompt = render(&step.prompt_template, vars);
 
-    tracing::info!("Launching harness");
+    tracing::info!("Launching {} harness", harness.name());
     harness
         .run_step(
             step,
