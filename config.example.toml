@@ -1,5 +1,22 @@
 poll_interval_secs = 60
 
+# ── Git configuration ─────────────────────────────────────────────────
+# Controls how the orchestrator manages the local repository clone and
+# optional per-issue worktrees.
+#
+# clone = true (default): clone/pull the repo into <data-dir>/<owner>/<repo>/repo/
+# clone = false: skip git operations entirely (no repo checkout)
+# worktree = false (default): agent runs in the shared repo checkout
+# worktree = true: create a fresh git worktree per issue, cleaned up after
+# default_branch = "main" (default): branch used for git pull and worktree creation
+#
+# NOTE: worktree = true requires clone = true (enforced on startup).
+
+[git]
+clone = true
+worktree = false
+default_branch = "main"
+
 # ── Triggers ──────────────────────────────────────────────────────────
 # What initiates a workflow run. Supported types:
 #   - github_issue_assigned: polls for issues assigned to a user
@@ -23,17 +40,26 @@ repo = "your-repo"
 
 # ── Workflow steps ────────────────────────────────────────────────────
 # Executed sequentially for each triggered issue.
-# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{workspace}}
+# Template placeholders:
+#   {{owner}}, {{repo}}, {{issue_number}}, {{output_path}},
+#   {{repo_path}} (path to the base repo clone; empty when git.clone = false)
 
 [[steps]]
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
 harness = { type = "hermes", profile = "cto" }
-# worktree = true       # optional: passes --worktree to hermes
 # provider = "openai"   # optional: passes --provider to hermes
 # model = "o3"          # optional: passes --model to hermes
 
 [[steps]]
 name = "implement"
 prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary of what you did to {{output_path}}/step_01_implement.md."
-harness = { type = "hermes", profile = "cto", worktree = true }
+harness = { type = "hermes", profile = "cto" }
+
+# ── Optional pre/post hooks ────────────────────────────────────────────
+# [[steps.pre_hooks]]
+# type = "file_not_empty"
+# path = "{{output_path}}/triage.md"
+
+# [[steps.post_hooks]]
+# type = "push_code"

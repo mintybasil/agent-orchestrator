@@ -125,12 +125,10 @@ harness = { type = "hermes", profile = "cto" }
         match &config.steps[0].harness {
             HarnessConfig::Hermes {
                 profile,
-                worktree,
                 provider,
                 model,
             } => {
                 assert_eq!(profile, "cto");
-                assert!(!worktree);
                 assert!(provider.is_none());
                 assert!(model.is_none());
             }

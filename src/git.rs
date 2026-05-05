@@ -4,32 +4,33 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::instrument;
 
-/// Ensure a git workspace exists at `<data_root>/<owner>/<repo>/workspace`.
+/// Ensure a git repository clone exists at `<data_root>/<owner>/<repo>/repo`.
 ///
 /// If the directory does not exist, clones the repository. If it already
-/// exists, pulls the latest changes from `origin main`.
+/// exists, pulls the latest changes from `origin <default_branch>`.
 ///
 /// Authentication is handled via `GIT_ASKPASS`: the binary re-invokes itself
 /// as a credential helper, reading the token from `AO_GIT_TOKEN`. The token
 /// is never embedded in URLs or written to `.git/config`.
 ///
-/// Returns the path to the workspace directory.
-pub fn ensure_workspace(
+/// Returns the path to the repo directory.
+pub fn ensure_repo(
     data_root: &Path,
     owner: &str,
     repo: &str,
+    default_branch: &str,
     token: &str,
     current_exe: &Path,
 ) -> anyhow::Result<PathBuf> {
-    let workspace = data_root.join(owner).join(repo).join("workspace");
+    let repo_path = data_root.join(owner).join(repo).join("repo");
 
-    if workspace.exists() {
-        pull_main(&workspace, token, current_exe)?;
+    if repo_path.exists() {
+        pull_default_branch(&repo_path, default_branch, token, current_exe)?;
     } else {
-        clone_repo(owner, repo, token, current_exe, &workspace)?;
+        clone_repo(owner, repo, token, current_exe, &repo_path)?;
     }
 
-    Ok(workspace)
+    Ok(repo_path)
 }
 
 /// Build a git command with ASKPASS authentication env vars set.
@@ -85,17 +86,22 @@ fn clone_repo(
     }
 }
 
-/// Pull the latest changes from `origin main` in the given workspace directory.
+/// Pull the latest changes from `origin <default_branch>` in the given repo directory.
 ///
-/// Pull failure is non-fatal (logged as warning) — the workspace might be on
+/// Pull failure is non-fatal (logged as warning) — the repo might be on
 /// a feature branch or have local changes.
 #[instrument(skip(token, current_exe), parent = None)]
-fn pull_main(workspace: &Path, token: &str, current_exe: &Path) -> anyhow::Result<()> {
+fn pull_default_branch(
+    repo_path: &Path,
+    default_branch: &str,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<()> {
     tracing::info!("Pulling latest changes...");
 
     let output = git_command(token, current_exe)
-        .args(["pull", "--quiet", "origin", "main"])
-        .current_dir(workspace)
+        .args(["pull", "--quiet", "origin", default_branch])
+        .current_dir(repo_path)
         .output()
         .context("failed to spawn git pull")?;
 
@@ -111,6 +117,145 @@ fn pull_main(workspace: &Path, token: &str, current_exe: &Path) -> anyhow::Resul
             scrubbed
         );
         Ok(())
+    }
+}
+
+/// Create a git worktree at `worktree_path` based on `default_branch`.
+///
+/// The worktree is a lightweight checkout of the repository that lives
+/// alongside the main clone. It is created with a detached HEAD at the
+/// tip of `default_branch`, so no branch tracking is set up — the agent
+/// can create its own branches inside the worktree.
+#[instrument(skip(token, current_exe))]
+pub fn create_worktree(
+    repo_path: &Path,
+    worktree_path: &Path,
+    default_branch: &str,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<()> {
+    tracing::info!(path = %worktree_path.display(), "Creating worktree...");
+
+    // Ensure parent directory exists
+    if let Some(parent) = worktree_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let output = git_command(token, current_exe)
+        .args(["worktree", "add"])
+        .arg(worktree_path)
+        .arg(default_branch)
+        .current_dir(repo_path)
+        .output()
+        .context("failed to spawn git worktree add")?;
+
+    if output.status.success() {
+        tracing::info!("Worktree created");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let scrubbed = scrub_credentials(&stderr);
+        anyhow::bail!(
+            "git worktree add failed (exit code {:?}): {}",
+            output.status.code(),
+            scrubbed
+        );
+    }
+}
+
+/// Remove a git worktree at the given path.
+///
+/// Runs `git worktree remove` from the main repository. Forces removal
+/// even if there are uncommitted changes.
+#[instrument(skip(token, current_exe))]
+pub fn remove_worktree(
+    repo_path: &Path,
+    worktree_path: &Path,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<()> {
+    tracing::info!(path = %worktree_path.display(), "Removing worktree...");
+
+    let output = git_command(token, current_exe)
+        .args(["worktree", "remove", "--force"])
+        .arg(worktree_path)
+        .current_dir(repo_path)
+        .output()
+        .context("failed to spawn git worktree remove")?;
+
+    if output.status.success() {
+        tracing::info!("Worktree removed");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let scrubbed = scrub_credentials(&stderr);
+        anyhow::bail!(
+            "git worktree remove failed (exit code {:?}): {}",
+            output.status.code(),
+            scrubbed
+        );
+    }
+}
+
+/// Check for uncommitted changes in the given directory.
+///
+/// Returns `Ok(true)` if there are uncommitted changes, `Ok(false)` if clean.
+pub fn has_uncommitted_changes(
+    work_dir: &Path,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<bool> {
+    let output = git_command(token, current_exe)
+        .args(["diff-index", "--quiet", "HEAD", "--"])
+        .current_dir(work_dir)
+        .output()
+        .context("failed to spawn git diff-index")?;
+
+    // git diff-index exits 0 if clean, 1 if there are differences
+    Ok(!output.status.success())
+}
+
+/// Check for unpushed commits in the given directory.
+///
+/// Returns `Ok(true)` if there are local commits not on the remote,
+/// `Ok(false)` if up-to-date.
+pub fn has_unpushed_commits(
+    work_dir: &Path,
+    default_branch: &str,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<bool> {
+    let upstream = format!("origin/{}", default_branch);
+    let output = git_command(token, current_exe)
+        .args(["log", &upstream, "..HEAD", "--oneline"])
+        .current_dir(work_dir)
+        .output()
+        .context("failed to spawn git log")?;
+
+    Ok(output.status.success() && !output.stdout.is_empty())
+}
+
+/// Push commits from the given directory to the remote.
+pub fn push_commits(work_dir: &Path, token: &str, current_exe: &Path) -> anyhow::Result<()> {
+    tracing::info!("Pushing unpushed commits...");
+
+    let output = git_command(token, current_exe)
+        .args(["push"])
+        .current_dir(work_dir)
+        .output()
+        .context("failed to spawn git push")?;
+
+    if output.status.success() {
+        tracing::info!("Push succeeded");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let scrubbed = scrub_credentials(&stderr);
+        anyhow::bail!(
+            "git push failed (exit code {:?}): {}",
+            output.status.code(),
+            scrubbed
+        );
     }
 }
 
@@ -134,14 +279,11 @@ mod tests {
     }
 
     #[test]
-    fn workspace_path_is_under_owner_repo() {
+    fn repo_path_is_under_owner_repo() {
         let data_root = PathBuf::from("/tmp/test-data");
-        let workspace = data_root
-            .join("zerokrab")
-            .join("bento-hancho")
-            .join("workspace");
-        assert!(workspace.starts_with(&data_root));
-        assert!(workspace.to_string_lossy().contains("workspace"));
+        let repo_path = data_root.join("zerokrab").join("bento-hancho").join("repo");
+        assert!(repo_path.starts_with(&data_root));
+        assert!(repo_path.to_string_lossy().contains("repo"));
     }
 
     #[test]
