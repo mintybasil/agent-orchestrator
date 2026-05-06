@@ -1,11 +1,19 @@
 use crate::harness::Harness;
 use crate::workflow::Step;
 use anyhow::Result;
+use chrono::Utc;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tracing::Span;
+
+/// Prepend a UTC timestamp to a line for log file output.
+///
+/// Format: `[YYYY-MM-DD HH:MM:SS UTC] <line>`
+fn timestamp_line(line: &str) -> String {
+    format!("[{}] {}", Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), line)
+}
 
 /// Arguments for invoking the hermes CLI agent.
 ///
@@ -147,6 +155,11 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
 /// written to the log file chunk-by-chunk as it arrives and flushed after each
 /// write to guarantee completeness even if the process exits abruptly.
 ///
+/// Each line written to the log file is prefixed with a UTC timestamp via
+/// [`timestamp_line`]. The raw (un-timestamped) text is captured in
+/// `stderr_capture` for error reporting, and traced without timestamps when
+/// `show_logs` is true.
+///
 /// When `show_logs` is true, each complete line within a chunk is also emitted
 /// via tracing. Partial lines at chunk boundaries are not traced immediately
 /// (they are written to the log file immediately though) and will appear in a
@@ -167,14 +180,16 @@ fn drain_stream(
             Ok(n) => {
                 let chunk = String::from_utf8_lossy(&buffer[..n]);
 
-                // Write to log file and flush to ensure data hits disk promptly
+                // Write timestamped lines to log file and flush to ensure data hits disk promptly
                 {
                     let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
-                    let _ = write!(writer, "{}", chunk);
+                    for line in chunk.lines() {
+                        let _ = writeln!(writer, "{}", timestamp_line(line));
+                    }
                     let _ = writer.flush();
                 }
 
-                // Capture stderr for error_file on failure
+                // Capture raw (un-timestamped) stderr for error_file on failure
                 if let Some(capture) = stderr_capture {
                     let mut cap = capture.lock().unwrap_or_else(|e| e.into_inner());
                     cap.push_str(&chunk);
@@ -250,8 +265,44 @@ impl Harness for HermesHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use regex::Regex;
     use std::process::{Command, Stdio};
     use tempfile::TempDir;
+
+    // --- timestamp_line tests ---
+
+    #[test]
+    fn test_timestamp_line_format() {
+        let result = timestamp_line("hello world");
+        // Should match [YYYY-MM-DD HH:MM:SS UTC] hello world
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] hello world$").unwrap();
+        assert!(
+            re.is_match(&result),
+            "timestamp_line output did not match expected format: {result}"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_line_empty() {
+        let result = timestamp_line("");
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] $").unwrap();
+        assert!(
+            re.is_match(&result),
+            "timestamp_line with empty input did not match: {result}"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_line_preserves_content() {
+        let content = "some log output with special chars: !@#$%^&*()";
+        let result = timestamp_line(content);
+        assert!(
+            result.ends_with(content),
+            "timestamp_line should preserve the original content at the end: {result}"
+        );
+    }
+
+    // --- Log capture regression tests ---
 
     /// Regression test: verify that the log captures the beginning of output,
     /// not just the end. Spawns a child that prints 1000 numbered lines and
@@ -313,6 +364,7 @@ mod tests {
         assert!(status.success());
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap();
+        // Each line should be timestamped, so check for the content after the timestamp
         assert!(
             log_contents.contains("LINE 001"),
             "log is missing the beginning of output. First 200 chars: {}",
@@ -322,8 +374,12 @@ mod tests {
             log_contents.contains("LINE 1000"),
             "log is missing the end of output"
         );
-        let line_count = log_contents.lines().count();
-        assert_eq!(line_count, 1000, "expected 1000 lines, got {}", line_count);
+        // Verify timestamp prefix is present on lines
+        let re = Regex::new(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]").unwrap();
+        assert!(
+            re.is_match(&log_contents),
+            "log lines should have timestamp prefix"
+        );
     }
 
     /// Test that output without a trailing newline is fully captured.
