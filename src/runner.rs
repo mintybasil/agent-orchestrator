@@ -70,8 +70,8 @@ struct RunContext {
 /// current_exe is the path to this binary, used as GIT_ASKPASS helper.
 /// show_logs controls whether harness output is also printed to the terminal.
 /// git_config controls repo clone and worktree behavior.
-#[instrument(skip(data_root, steps, token, current_exe, git_config))]
-pub async fn run_event(
+#[instrument(skip_all, fields(key=key.to_string()))]
+pub async fn run_workflow(
     key: &EventKey,
     data_root: &Path,
     steps: &[Step],
@@ -231,7 +231,7 @@ async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
     Ok(())
 }
 
-#[instrument(skip(step, ctx, vars), fields(step=step.name, key = ctx.key))]
+#[instrument(skip_all, fields(step=step.name, key = ctx.key), parent = None)]
 async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------

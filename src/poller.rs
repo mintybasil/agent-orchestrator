@@ -8,7 +8,7 @@ use tokio::sync::Semaphore;
 use tokio::time::{Duration, interval};
 
 use crate::config::Config;
-use crate::runner::{EventKey, run_event};
+use crate::runner::{EventKey, run_workflow};
 use crate::trigger::Trigger;
 use crate::workflow;
 
@@ -183,7 +183,7 @@ pub async fn run_poll_loop(
                         // Acquire semaphore permit — blocks if at capacity.
                         let _permit = sem_clone.acquire().await.expect("semaphore not closed");
 
-                        let result = run_event(
+                        let result = run_workflow(
                             &event_key,
                             &data_root_clone,
                             &steps_clone,

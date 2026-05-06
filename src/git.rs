@@ -47,7 +47,7 @@ pub(crate) fn git_command(token: &str, current_exe: &Path) -> Command {
 }
 
 /// Clone a GitHub repository into `target_dir`.
-#[instrument(skip(token, current_exe))]
+#[instrument(skip(token, current_exe), parent = None)]
 fn clone_repo(
     owner: &str,
     repo: &str,
@@ -90,7 +90,7 @@ fn clone_repo(
 ///
 /// Pull failure is non-fatal (logged as warning) — the repo might be on
 /// a feature branch or have local changes.
-#[instrument(skip(token, current_exe))]
+#[instrument(skip(token, current_exe), parent = None)]
 fn pull_default_branch(
     repo: &Path,
     base: &str,
@@ -126,7 +126,7 @@ fn pull_default_branch(
 /// worktree from sharing the same branch as the main clone.
 ///
 /// Returns the name of the created branch so it can be cleaned up later.
-#[instrument(skip(token, current_exe))]
+#[instrument(skip(token, current_exe), parent = None)]
 pub fn create_worktree(
     repo: &Path,
     path: &Path,

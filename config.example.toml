@@ -43,6 +43,12 @@ allowed_users = ["your-github-username"]
 owner = "your-org"
 repo = "your-repo"
 
+# Alternative compact format:
+# repos = [
+#   { owner = "your-org", repo = "your-repo" },
+#   { owner = "your-org", repo = "your-repo2" }
+# ]
+
 # ── Workflow steps ────────────────────────────────────────────────────
 # Executed sequentially for each triggered issue.
 # Template placeholders:
