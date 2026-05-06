@@ -29,6 +29,7 @@ pub async fn run_poll_loop(
     show_logs: bool,
     concurrency_limit: usize,
     poll_interval_secs: u64,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -61,10 +62,25 @@ pub async fn run_poll_loop(
         })
         .collect();
 
+    let mut active_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
     loop {
-        ticker.tick().await;
+        // Use select so the tick can be interrupted by shutdown.
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = shutdown_rx.changed() => {
+                tracing::info!("Poll loop shutting down: skipping new event dispatch");
+                break;
+            }
+        }
+
+        // Check if shutdown was already requested (in case changed() fired
+        // between ticks without us catching it via select).
+        if *shutdown_rx.borrow() {
+            tracing::info!("Poll loop shutting down: skipping new event dispatch");
+            break;
+        }
 
         for entry in &workflow_entries {
             for trigger in &entry.triggers {
@@ -150,7 +166,7 @@ pub async fn run_poll_loop(
                     let git_config_clone = entry.git_config.clone();
                     let sem_clone = Arc::clone(&semaphore);
 
-                    tokio::spawn(async move {
+                    let handle = tokio::spawn(async move {
                         // Acquire semaphore permit — blocks if at capacity.
                         let _permit = sem_clone.acquire().await.expect("semaphore not closed");
 
@@ -197,10 +213,29 @@ pub async fn run_poll_loop(
                             }
                         }
                     });
+                    active_tasks.push(handle);
                 }
             }
         }
+
+        // Periodically clean up finished handles to avoid unbounded growth.
+        active_tasks.retain(|h| !h.is_finished());
     }
+
+    // Loop exited (shutdown requested) — wait for active workflows to drain.
+    active_tasks.retain(|h| !h.is_finished());
+    if !active_tasks.is_empty() {
+        tracing::info!(
+            "Waiting for {} active workflow(s) to complete…",
+            active_tasks.len()
+        );
+        for handle in active_tasks {
+            let _ = handle.await;
+        }
+    }
+    tracing::info!("All active workflows completed. Exiting.");
+
+    Ok(())
 }
 
 /// Pre-processed workflow entry used inside the poll loop.

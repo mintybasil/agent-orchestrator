@@ -133,6 +133,43 @@ async fn main() {
 
     let completed = poller::load_completed(&data_root);
 
+    // Shutdown signal: first Ctrl+C / SIGTERM → graceful shutdown (stop
+    // dispatching, drain active workflows); second signal → immediate exit.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    tokio::spawn(async move {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut sigint = signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
+        let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+
+        let mut first_signal = true;
+        loop {
+            tokio::select! {
+                _ = sigint.recv() => {
+                    if first_signal {
+                        tracing::info!("SIGINT received. Gracefully shutting down…");
+                        let _ = shutdown_tx.send(true);
+                        first_signal = false;
+                    } else {
+                        tracing::warn!("Second shutdown signal received. Forcing immediate exit.");
+                        std::process::exit(1);
+                    }
+                }
+                _ = sigterm.recv() => {
+                    if first_signal {
+                        tracing::info!("SIGTERM received. Gracefully shutting down…");
+                        let _ = shutdown_tx.send(true);
+                        first_signal = false;
+                    } else {
+                        tracing::warn!("Second SIGTERM received. Forcing immediate exit.");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    });
+
     if let Err(e) = poller::run_poll_loop(
         configs,
         token,
@@ -142,6 +179,7 @@ async fn main() {
         cli.show_logs,
         cli.limit,
         cli.interval,
+        shutdown_rx,
     )
     .await
     {
