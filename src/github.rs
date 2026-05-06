@@ -2,6 +2,20 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 
+#[derive(Debug, Deserialize)]
+struct GithubErrorResponse {
+    message: Option<String>,
+}
+
+fn format_github_error(status: reqwest::StatusCode, body: &str) -> String {
+    if let Ok(error_resp) = serde_json::from_str::<GithubErrorResponse>(body)
+        && let Some(msg) = error_resp.message
+    {
+        return format!("GitHub API returned {}: {}", status, msg);
+    }
+    format!("GitHub API returned {} (body too large or not JSON)", status)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Issue {
     pub number: u64,
@@ -35,7 +49,7 @@ pub async fn list_assigned_issues(
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("GitHub API returned {}: {}", status, body);
+            anyhow::bail!("{}", format_github_error(status, &body));
         }
 
         let page_issues: Vec<Issue> = resp
@@ -98,7 +112,7 @@ pub async fn list_pr_reviews(
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("GitHub API returned {}: {}", status, body);
+            anyhow::bail!("{}", format_github_error(status, &body));
         }
 
         let page_prs: Vec<PullRequest> = resp
@@ -128,7 +142,7 @@ pub async fn list_pr_reviews(
             let reviews_status = reviews_resp.status();
             if !reviews_status.is_success() {
                 let body = reviews_resp.text().await.unwrap_or_default();
-                anyhow::bail!("GitHub API returned {}: {}", reviews_status, body);
+                anyhow::bail!("{}", format_github_error(reviews_status, &body));
             }
 
             let reviews: Vec<ReviewResponse> = reviews_resp
@@ -154,4 +168,39 @@ pub async fn list_pr_reviews(
 #[derive(Debug, Clone, Deserialize)]
 struct PullRequest {
     number: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_github_error_json() {
+        let status = reqwest::StatusCode::SERVICE_UNAVAILABLE;
+        let body = r#"{"message": "No server available"}"#;
+        assert_eq!(
+            format_github_error(status, body),
+            "GitHub API returned 503 Service Unavailable: No server available"
+        );
+    }
+
+    #[test]
+    fn test_format_github_error_html() {
+        let status = reqwest::StatusCode::GATEWAY_TIMEOUT;
+        let body = "<html><body>504 Gateway Timeout</body></html>";
+        assert_eq!(
+            format_github_error(status, body),
+            "GitHub API returned 504 Gateway Timeout (body too large or not JSON)"
+        );
+    }
+
+    #[test]
+    fn test_format_github_error_json_without_message() {
+        let status = reqwest::StatusCode::FORBIDDEN;
+        let body = r#"{"documentation_url": "https://docs.github.com"}"#;
+        assert_eq!(
+            format_github_error(status, body),
+            "GitHub API returned 403 Forbidden (body too large or not JSON)"
+        );
+    }
 }
