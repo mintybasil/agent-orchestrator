@@ -226,8 +226,7 @@ mod tests {
     #[test]
     fn test_timestamp_line_empty() {
         let result = timestamp_line("");
-        let re =
-            Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] $").unwrap();
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] $").unwrap();
         assert!(
             re.is_match(&result),
             "timestamp_line with empty input did not match: {result}"
