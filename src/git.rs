@@ -126,7 +126,7 @@ fn pull_default_branch(
 /// worktree from sharing the same branch as the main clone.
 ///
 /// Returns the name of the created branch so it can be cleaned up later.
-#[instrument(skip(token, current_exe))]
+#[instrument(skip(token, current_exe), parent = None)]
 pub fn create_worktree(
     repo: &Path,
     path: &Path,
