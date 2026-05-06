@@ -39,17 +39,14 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    // Load config
-    let config = match config::Config::load(&cli.config) {
+    // Load all workflow configs from the --workflows directory
+    let configs = match config::Config::load_all(&cli.workflows) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("ERROR: {e}");
             std::process::exit(1);
         }
     };
-
-    let workflow_steps = config.steps.clone();
-    let trigger_count = config.triggers.len();
 
     // Use the compact formatter so span fields (profile, issue, step_name)
     // appear on every event line, making it easy to tell which issue
@@ -120,25 +117,31 @@ async fn main() {
         }
     }
 
+    let concurrency_msg = if cli.limit == 0 {
+        "unlimited".to_string()
+    } else {
+        cli.limit.to_string()
+    };
+
     tracing::info!(
-        "agent-orchestrator starting: {} repos, {} triggers, {} workflow steps, poll every {}s, data_dir={}",
-        config.repos.len(),
-        trigger_count,
-        workflow_steps.len(),
-        config.poll_interval_secs,
+        "agent-orchestrator starting: workflows={}, poll interval={}s, concurrent={}, data_dir={}",
+        configs.len(),
+        cli.interval,
+        concurrency_msg,
         data_root.display()
     );
 
     let completed = poller::load_completed(&data_root);
 
     if let Err(e) = poller::run_poll_loop(
-        config,
+        configs,
         token,
         &data_root,
         completed,
-        workflow_steps,
         &current_exe,
         cli.show_logs,
+        cli.limit,
+        cli.interval,
     )
     .await
     {

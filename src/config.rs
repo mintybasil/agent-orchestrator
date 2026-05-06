@@ -42,8 +42,6 @@ impl Default for GitConfig {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Config {
-    pub poll_interval_secs: u64,
-
     /// Trigger configuration — what initiates workflow runs.
     /// Empty vec is allowed at deserialization but rejected by Config::load.
     #[serde(default)]
@@ -93,6 +91,37 @@ impl Config {
         );
         Ok(config)
     }
+
+    /// Load all .toml files from a directory, sorted by filename for determinism.
+    /// Returns an error if the directory contains no .toml files or any file
+    /// fails validation.
+    pub fn load_all(dir: &std::path::Path) -> anyhow::Result<Vec<Self>> {
+        anyhow::ensure!(
+            dir.is_dir(),
+            "--workflows path {:?} is not a directory",
+            dir
+        );
+
+        let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "toml"))
+            .collect();
+        entries.sort();
+
+        anyhow::ensure!(
+            !entries.is_empty(),
+            "no .toml files found in --workflows directory {:?}",
+            dir
+        );
+
+        let mut configs = Vec::with_capacity(entries.len());
+        for path in &entries {
+            tracing::info!("loading workflow config: {}", path.display());
+            configs.push(Self::load(path)?);
+        }
+        Ok(configs)
+    }
 }
 
 #[derive(clap::Parser, Debug)]
@@ -101,8 +130,17 @@ impl Config {
     about = "Poll GitHub and run agent workflows"
 )]
 pub struct Cli {
-    #[arg(long, default_value = "config.toml")]
-    pub config: std::path::PathBuf,
+    /// Directory containing workflow TOML files.
+    #[arg(long, default_value = ".")]
+    pub workflows: std::path::PathBuf,
+
+    /// Maximum number of concurrent workflow runs. 0 means unlimited.
+    #[arg(long, default_value_t = 0)]
+    pub limit: usize,
+
+    /// Poll interval in seconds. How often to check for new events.
+    #[arg(long, default_value_t = 60)]
+    pub interval: u64,
 
     #[arg(long, value_name = "DIR")]
     pub data_dir: Option<std::path::PathBuf>,
@@ -120,7 +158,7 @@ mod tests {
 
     #[test]
     fn default_data_dir_is_none_when_not_provided() {
-        let cli = Cli::try_parse_from(["agent-orchestrator", "--config", "cfg.toml"]).unwrap();
+        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", "."]).unwrap();
         assert!(
             cli.data_dir.is_none(),
             "expected None when --data-dir not provided, got: {:?}",
@@ -132,8 +170,8 @@ mod tests {
     fn custom_data_dir_is_respected() {
         let cli = Cli::try_parse_from([
             "agent-orchestrator",
-            "--config",
-            "cfg.toml",
+            "--workflows",
+            ".",
             "--data-dir",
             "/tmp/my-data",
         ])
@@ -142,10 +180,36 @@ mod tests {
     }
 
     #[test]
+    fn limit_defaults_to_zero() {
+        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", "."]).unwrap();
+        assert_eq!(cli.limit, 0, "default limit should be 0 (unlimited)");
+    }
+
+    #[test]
+    fn explicit_limit_is_respected() {
+        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", ".", "--limit", "4"])
+            .unwrap();
+        assert_eq!(cli.limit, 4);
+    }
+
+    #[test]
+    fn interval_defaults_to_60() {
+        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", "."]).unwrap();
+        assert_eq!(cli.interval, 60, "default interval should be 60 seconds");
+    }
+
+    #[test]
+    fn explicit_interval_is_respected() {
+        let cli =
+            Cli::try_parse_from(["agent-orchestrator", "--workflows", ".", "--interval", "30"])
+                .unwrap();
+        assert_eq!(cli.interval, 30);
+    }
+
+    #[test]
     fn explicit_trigger_deserializes() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -189,7 +253,6 @@ harness = { type = "hermes", profile = "cto" }
     fn no_triggers_errors() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[repos]]
 owner = "o"
@@ -215,7 +278,6 @@ harness = { type = "hermes", profile = "cto" }
         use std::io::Write;
         // Use an unknown hook variant to trigger a TOML deserialization error
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -250,7 +312,6 @@ path = "{{output_path}}"
     fn git_config_defaults() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -278,7 +339,6 @@ harness = { type = "hermes", profile = "cto" }
     fn git_worktree_requires_clone() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [git]
 clone = false
@@ -312,7 +372,6 @@ harness = { type = "hermes", profile = "cto" }
     fn both_trigger_types_deserialize() {
         use std::io::Write;
         let toml = r#"
-poll_interval_secs = 60
 
 [[triggers]]
 type = "github_issue_assigned"
@@ -348,5 +407,61 @@ harness = { type = "hermes", profile = "cto" }
             }
             other => panic!("expected GithubPrReview, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn load_all_discovers_toml_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let toml_content = r#"
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        // Write two .toml files
+        std::fs::write(dir.path().join("alpha.toml"), toml_content).unwrap();
+        std::fs::write(dir.path().join("beta.toml"), toml_content).unwrap();
+        // Write a non-toml file that should be ignored
+        std::fs::write(dir.path().join("readme.md"), "ignore me").unwrap();
+
+        let configs = Config::load_all(dir.path()).unwrap();
+        assert_eq!(
+            configs.len(),
+            2,
+            "expected 2 configs, got {}",
+            configs.len()
+        );
+    }
+
+    #[test]
+    fn load_all_rejects_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Config::load_all(dir.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no .toml files"),
+            "expected 'no .toml files' in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn load_all_rejects_non_directory() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let err = Config::load_all(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not a directory"),
+            "expected 'not a directory' in error, got: {msg}"
+        );
     }
 }
