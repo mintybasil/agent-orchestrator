@@ -1,11 +1,19 @@
 use crate::harness::Harness;
 use crate::workflow::Step;
 use anyhow::Result;
+use chrono::Utc;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tracing::Span;
+
+/// Prepend a UTC timestamp to a line for log file output.
+///
+/// Format: `[YYYY-MM-DD HH:MM:SS UTC] <line>`
+fn timestamp_line(line: &str) -> String {
+    format!("[{}] {}", Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), line)
+}
 
 /// Arguments for invoking the hermes CLI agent.
 ///
@@ -99,7 +107,7 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
                             let mut file =
                                 log_file_stderr.lock().unwrap_or_else(|e| e.into_inner());
                             use std::io::Write;
-                            let _ = writeln!(file, "{}", l);
+                            let _ = writeln!(file, "{}", timestamp_line(&l));
                         }
                         // Capture for error_file on failure
                         let mut cap = stderr_capture_clone
@@ -129,7 +137,7 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
                     {
                         let mut file = log_file_stdout.lock().unwrap_or_else(|e| e.into_inner());
                         use std::io::Write;
-                        let _ = writeln!(file, "{}", l);
+                        let _ = writeln!(file, "{}", timestamp_line(&l));
                     }
                 }
                 Err(e) => {
@@ -196,5 +204,42 @@ impl Harness for HermesHarness {
         };
 
         Box::pin(async move { tokio::task::spawn_blocking(move || invoke(&args)).await? })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use regex::Regex;
+
+    #[test]
+    fn test_timestamp_line_format() {
+        let result = timestamp_line("hello world");
+        // Should match [YYYY-MM-DD HH:MM:SS UTC] hello world
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] hello world$").unwrap();
+        assert!(
+            re.is_match(&result),
+            "timestamp_line output did not match expected format: {result}"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_line_empty() {
+        let result = timestamp_line("");
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] $").unwrap();
+        assert!(
+            re.is_match(&result),
+            "timestamp_line with empty input did not match: {result}"
+        );
+    }
+
+    #[test]
+    fn test_timestamp_line_preserves_content() {
+        let content = "some log output with special chars: !@#$%^&*()";
+        let result = timestamp_line(content);
+        assert!(
+            result.ends_with(content),
+            "timestamp_line should preserve the original content at the end: {result}"
+        );
     }
 }
