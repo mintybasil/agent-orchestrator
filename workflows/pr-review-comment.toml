@@ -6,6 +6,7 @@ repos = [
     {owner = "zerokrab", repo = "boundless-profit-explorer"},
     {owner = "mintybasil", repo = "agent-orchestrator"},
     {owner = "mintybasil", repo = "mintybasil.dev"},
+    {owner = "mintybasil", repo = "agent-vms-ansible"},
 ]
 
 [git]
