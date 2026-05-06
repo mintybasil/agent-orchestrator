@@ -13,7 +13,10 @@ fn format_github_error(status: reqwest::StatusCode, body: &str) -> String {
     {
         return format!("GitHub API returned {}: {}", status, msg);
     }
-    format!("GitHub API returned {} (body too large or not JSON)", status)
+    format!(
+        "GitHub API returned {} (body too large or not JSON)",
+        status
+    )
 }
 
 #[derive(Debug, Clone, Deserialize)]
