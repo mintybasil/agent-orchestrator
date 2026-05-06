@@ -126,6 +126,7 @@ Each monitored repo gets a directory under the data dir:
       worktree-{N}/        -- per-issue git worktree (when git.worktree = true)
       step_NN_<name>.log   -- full harness stdout+stderr log
       step_NN_<name>.error -- stderr on failure only
+      step_NN_<name>.prompt -- rendered prompt text (after template substitution)
   completed.json         -- set of completed issue keys
   failed.json            -- list of failed issue entries
 ```

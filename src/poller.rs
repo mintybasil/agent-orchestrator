@@ -29,6 +29,7 @@ pub async fn run_poll_loop(
     show_logs: bool,
     concurrency_limit: usize,
     poll_interval_secs: u64,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
@@ -61,10 +62,25 @@ pub async fn run_poll_loop(
         })
         .collect();
 
+    let mut active_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
     loop {
-        ticker.tick().await;
+        // Use select so the tick can be interrupted by shutdown.
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = shutdown_rx.changed() => {
+                tracing::info!("Poll loop shutting down: skipping new event dispatch");
+                break;
+            }
+        }
+
+        // Check if shutdown was already requested (in case changed() fired
+        // between ticks without us catching it via select).
+        if *shutdown_rx.borrow() {
+            tracing::info!("Poll loop shutting down: skipping new event dispatch");
+            break;
+        }
 
         for entry in &workflow_entries {
             for trigger in &entry.triggers {
@@ -86,19 +102,32 @@ pub async fn run_poll_loop(
                     // Build dedup key from owner/repo/event_key
                     let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
 
-                    // Parse the issue number from the event key
-                    let issue_number: u64 = match event.key.parse() {
+                    // Parse the directory number from the event key.
+                    // For issues the key is a plain number (e.g. "42").
+                    // For PR reviews the key is composite (e.g. "99/1234567"),
+                    // so we extract the PR number from variables instead.
+                    let dir_number: u64 = match event.key.parse() {
                         Ok(n) => n,
-                        Err(_) => {
-                            tracing::warn!("trigger event key is not a number: {}", event.key);
-                            continue;
-                        }
+                        Err(_) => event
+                            .variables
+                            .get("pr_number")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or_else(|| {
+                                tracing::warn!(
+                                    "trigger event key is not a number and no pr_number variable: {}",
+                                    event.key
+                                );
+                                0
+                            }),
                     };
+                    if dir_number == 0 {
+                        continue;
+                    }
 
                     let event_key = EventKey {
                         owner: event.owner.clone(),
                         repo: event.repo.clone(),
-                        number: issue_number,
+                        number: dir_number,
                         label: event.label.clone(),
                         variables: event.variables.clone(),
                     };
@@ -150,7 +179,7 @@ pub async fn run_poll_loop(
                     let git_config_clone = entry.git_config.clone();
                     let sem_clone = Arc::clone(&semaphore);
 
-                    tokio::spawn(async move {
+                    let handle = tokio::spawn(async move {
                         // Acquire semaphore permit — blocks if at capacity.
                         let _permit = sem_clone.acquire().await.expect("semaphore not closed");
 
@@ -197,10 +226,29 @@ pub async fn run_poll_loop(
                             }
                         }
                     });
+                    active_tasks.push(handle);
                 }
             }
         }
+
+        // Periodically clean up finished handles to avoid unbounded growth.
+        active_tasks.retain(|h| !h.is_finished());
     }
+
+    // Loop exited (shutdown requested) — wait for active workflows to drain.
+    active_tasks.retain(|h| !h.is_finished());
+    if !active_tasks.is_empty() {
+        tracing::info!(
+            "Waiting for {} active workflow(s) to complete…",
+            active_tasks.len()
+        );
+        for handle in active_tasks {
+            let _ = handle.await;
+        }
+    }
+    tracing::info!("All active workflows completed. Exiting.");
+
+    Ok(())
 }
 
 /// Pre-processed workflow entry used inside the poll loop.
