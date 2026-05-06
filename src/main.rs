@@ -141,7 +141,8 @@ async fn main() {
         use tokio::signal::unix::{SignalKind, signal};
 
         let mut sigint = signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
-        let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
 
         let mut first_signal = true;
         loop {
