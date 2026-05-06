@@ -102,19 +102,32 @@ pub async fn run_poll_loop(
                     // Build dedup key from owner/repo/event_key
                     let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
 
-                    // Parse the issue number from the event key
-                    let issue_number: u64 = match event.key.parse() {
+                    // Parse the directory number from the event key.
+                    // For issues the key is a plain number (e.g. "42").
+                    // For PR reviews the key is composite (e.g. "99/1234567"),
+                    // so we extract the PR number from variables instead.
+                    let dir_number: u64 = match event.key.parse() {
                         Ok(n) => n,
-                        Err(_) => {
-                            tracing::warn!("trigger event key is not a number: {}", event.key);
-                            continue;
-                        }
+                        Err(_) => event
+                            .variables
+                            .get("pr_number")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or_else(|| {
+                                tracing::warn!(
+                                    "trigger event key is not a number and no pr_number variable: {}",
+                                    event.key
+                                );
+                                0
+                            }),
                     };
+                    if dir_number == 0 {
+                        continue;
+                    }
 
                     let event_key = EventKey {
                         owner: event.owner.clone(),
                         repo: event.repo.clone(),
-                        number: issue_number,
+                        number: dir_number,
                         label: event.label.clone(),
                         variables: event.variables.clone(),
                     };
