@@ -13,7 +13,7 @@ pub struct TriggerEvent {
     pub owner: String,
     pub repo: String,
     /// Opaque identifier for dedup (e.g. "42" for an issue number,
-    /// "99/1234567" for a PR review).
+    /// "99/1234567" for a PR review where 99 is the PR number).
     pub key: String,
     /// Human-readable label for logging.
     pub label: String,
@@ -211,7 +211,7 @@ impl Trigger for GithubPrReviewTrigger {
                                     repo: repo_cfg.repo.clone(),
                                     key: format!("{}/{}", review.pr_number, review.id),
                                     label: format!(
-                                        "{}/{}#review_{}/{}",
+                                        "{}/{}#{}_review{}",
                                         repo_cfg.owner, repo_cfg.repo, review.pr_number, review.id
                                     ),
                                     variables: vars,
@@ -308,12 +308,12 @@ allowed_users = ["alice", "bob"]
             owner: "acme".to_string(),
             repo: "project".to_string(),
             key: "99/1234567".to_string(),
-            label: "acme/project#review_99/1234567".to_string(),
+            label: "acme/project#99_review1234567".to_string(),
             variables: vars,
         };
         assert_eq!(event.variables.get("pr_number"), Some(&"99".to_string()));
         assert_eq!(event.variables.get("issue_number"), None);
         assert_eq!(event.key, "99/1234567");
-        assert_eq!(event.label, "acme/project#review_99/1234567");
+        assert_eq!(event.label, "acme/project#99_review1234567");
     }
 }
