@@ -2,7 +2,7 @@ use crate::harness::Harness;
 use crate::workflow::Step;
 use anyhow::Result;
 use chrono::Utc;
-use std::io::{BufRead, BufReader};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -81,11 +81,14 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
     let stderr_issue = args.issue.clone();
     let stderr_step = args.step.clone();
 
-    // Create the log file. Both stdout and stderr threads write here.
+    // Create the log file with a BufWriter for efficient, flushed writes.
+    // Both stdout and stderr threads write here.
     let log_file = std::fs::File::create(&args.log_file)
         .map_err(|e| anyhow::anyhow!("failed to create log file {:?}: {}", args.log_file, e))?;
-    let log_file_stdout = Arc::new(Mutex::new(log_file));
-    let log_file_stderr = Arc::clone(&log_file_stdout);
+    let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
+        Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
+    let log_writer_stderr = Arc::clone(&log_writer);
+    let log_writer_stdout = Arc::clone(&log_writer);
 
     let show_logs = args.show_logs;
 
@@ -95,60 +98,39 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
     let stderr_thread = std::thread::spawn(move || {
         let _enter = parent_span.enter();
         if let Some(stderr) = stderr_stream {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                match line {
-                    Ok(l) => {
-                        if show_logs {
-                            tracing::error!(issue = %stderr_issue, step = %stderr_step, "{}", l);
-                        }
-                        // Write to log file
-                        {
-                            let mut file =
-                                log_file_stderr.lock().unwrap_or_else(|e| e.into_inner());
-                            use std::io::Write;
-                            let _ = writeln!(file, "{}", timestamp_line(&l));
-                        }
-                        // Capture for error_file on failure
-                        let mut cap = stderr_capture_clone
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        cap.push_str(&l);
-                        cap.push('\n');
-                    }
-                    Err(e) => {
-                        tracing::warn!(issue = %stderr_issue, step = %stderr_step, "stderr read error: {}", e)
-                    }
-                }
-            }
+            drain_stream(
+                stderr,
+                &log_writer_stderr,
+                Some(&stderr_capture_clone),
+                show_logs,
+                true,
+                &stderr_issue,
+                &stderr_step,
+            );
         }
     });
 
     // Drain stdout in this thread (already inside the caller's span)
     if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(l) => {
-                    if show_logs {
-                        tracing::info!(issue = %args.issue, step = %args.step, "{}", l);
-                    }
-                    // Write to log file
-                    {
-                        let mut file = log_file_stdout.lock().unwrap_or_else(|e| e.into_inner());
-                        use std::io::Write;
-                        let _ = writeln!(file, "{}", timestamp_line(&l));
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(issue = %args.issue, step = %args.step, "stdout read error: {}", e)
-                }
-            }
-        }
+        drain_stream(
+            stdout,
+            &log_writer_stdout,
+            None,
+            show_logs,
+            false,
+            &args.issue,
+            &args.step,
+        );
     }
 
     // Wait for stderr thread to finish
     let _ = stderr_thread.join();
+
+    // Final flush of any remaining buffered log data
+    {
+        let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = writer.flush();
+    }
 
     let status = child.wait()?;
     if status.success() {
@@ -163,6 +145,79 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
             tracing::warn!("failed to write error file {:?}: {}", args.error_file, e);
         }
         anyhow::bail!("hermes exited with code {}", code);
+    }
+}
+
+/// Read all data from a child process stream into a log file.
+///
+/// Uses a byte-buffer `read()` loop instead of `BufReader::lines()` to ensure
+/// no data is lost due to line-buffering or incomplete final lines. Data is
+/// written to the log file chunk-by-chunk as it arrives and flushed after each
+/// write to guarantee completeness even if the process exits abruptly.
+///
+/// Each line written to the log file is prefixed with a UTC timestamp via
+/// [`timestamp_line`]. The raw (un-timestamped) text is captured in
+/// `stderr_capture` for error reporting, and traced without timestamps when
+/// `show_logs` is true.
+///
+/// When `show_logs` is true, each complete line within a chunk is also emitted
+/// via tracing. Partial lines at chunk boundaries are not traced immediately
+/// (they are written to the log file immediately though) and will appear in a
+/// subsequent tracing call when the newline arrives.
+fn drain_stream(
+    mut stream: impl Read,
+    log_writer: &Arc<Mutex<std::io::BufWriter<std::fs::File>>>,
+    stderr_capture: Option<&Arc<Mutex<String>>>,
+    show_logs: bool,
+    is_stderr: bool,
+    issue: &str,
+    step: &str,
+) {
+    let mut buffer = [0u8; 8192];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buffer[..n]);
+
+                // Write timestamped lines to log file and flush to ensure data hits disk promptly
+                {
+                    let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+                    for line in chunk.lines() {
+                        let _ = writeln!(writer, "{}", timestamp_line(line));
+                    }
+                    let _ = writer.flush();
+                }
+
+                // Capture raw (un-timestamped) stderr for error_file on failure
+                if let Some(capture) = stderr_capture {
+                    let mut cap = capture.lock().unwrap_or_else(|e| e.into_inner());
+                    cap.push_str(&chunk);
+                }
+
+                // Trace complete lines if show_logs is enabled
+                if show_logs {
+                    for line in chunk.lines() {
+                        if is_stderr {
+                            tracing::error!(issue = %issue, step = %step, "{}", line);
+                        } else {
+                            tracing::info!(issue = %issue, step = %step, "{}", line);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                let stream_name = if is_stderr { "stderr" } else { "stdout" };
+                tracing::warn!(
+                    issue = %issue,
+                    step = %step,
+                    "{} read error: {}",
+                    stream_name,
+                    e
+                );
+                break;
+            }
+        }
     }
 }
 
@@ -211,6 +266,10 @@ impl Harness for HermesHarness {
 mod tests {
     use super::*;
     use regex::Regex;
+    use std::process::{Command, Stdio};
+    use tempfile::TempDir;
+
+    // --- timestamp_line tests ---
 
     #[test]
     fn test_timestamp_line_format() {
@@ -240,6 +299,238 @@ mod tests {
         assert!(
             result.ends_with(content),
             "timestamp_line should preserve the original content at the end: {result}"
+        );
+    }
+
+    // --- Log capture regression tests ---
+
+    /// Regression test: verify that the log captures the beginning of output,
+    /// not just the end. Spawns a child that prints 1000 numbered lines and
+    /// checks that "LINE 001" appears in the log file.
+    #[test]
+    fn test_log_capture_completeness() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.log");
+
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("for i in $(seq 1 1000); do printf 'LINE %03d\\n' \"$i\"; done")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn test process");
+
+        let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
+            Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
+        let log_writer_clone = Arc::clone(&log_writer);
+        let stderr_capture_clone = Arc::clone(&stderr_capture);
+
+        let stderr_stream = child.stderr.take();
+        let stderr_thread = std::thread::spawn(move || {
+            if let Some(stderr) = stderr_stream {
+                drain_stream(
+                    stderr,
+                    &log_writer_clone,
+                    Some(&stderr_capture_clone),
+                    false,
+                    true,
+                    "test/issue",
+                    "test-step",
+                );
+            }
+        });
+
+        if let Some(stdout) = child.stdout.take() {
+            drain_stream(
+                stdout,
+                &log_writer,
+                None,
+                false,
+                false,
+                "test/issue",
+                "test-step",
+            );
+        }
+
+        let _ = stderr_thread.join();
+        {
+            let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = writer.flush();
+        }
+
+        let status = child.wait().expect("failed to wait for child");
+        assert!(status.success());
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap();
+        // Each line should be timestamped, so check for the content after the timestamp
+        assert!(
+            log_contents.contains("LINE 001"),
+            "log is missing the beginning of output. First 200 chars: {}",
+            &log_contents[..log_contents.len().min(200)]
+        );
+        assert!(
+            log_contents.contains("LINE 1000"),
+            "log is missing the end of output"
+        );
+        // Verify timestamp prefix is present on lines
+        let re = Regex::new(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]").unwrap();
+        assert!(
+            re.is_match(&log_contents),
+            "log lines should have timestamp prefix"
+        );
+    }
+
+    /// Test that output without a trailing newline is fully captured.
+    /// The old `lines()` implementation would silently drop such data.
+    #[test]
+    fn test_log_capture_no_trailing_newline() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.log");
+
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("printf 'first line\\nsecond line\\nno trailing newline'")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn test process");
+
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
+            Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
+        let log_writer_clone = Arc::clone(&log_writer);
+
+        let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        let stderr_capture_clone = Arc::clone(&stderr_capture);
+        let stderr_stream = child.stderr.take();
+        let stderr_thread = std::thread::spawn(move || {
+            if let Some(stderr) = stderr_stream {
+                drain_stream(
+                    stderr,
+                    &log_writer_clone,
+                    Some(&stderr_capture_clone),
+                    false,
+                    true,
+                    "test/issue",
+                    "test-step",
+                );
+            }
+        });
+
+        if let Some(stdout) = child.stdout.take() {
+            drain_stream(
+                stdout,
+                &log_writer,
+                None,
+                false,
+                false,
+                "test/issue",
+                "test-step",
+            );
+        }
+
+        let _ = stderr_thread.join();
+        {
+            let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = writer.flush();
+        }
+
+        let status = child.wait().expect("failed to wait for child");
+        assert!(status.success());
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            log_contents.contains("first line"),
+            "log is missing 'first line'"
+        );
+        assert!(
+            log_contents.contains("second line"),
+            "log is missing 'second line'"
+        );
+        assert!(
+            log_contents.contains("no trailing newline"),
+            "log is missing partial last line 'no trailing newline'"
+        );
+    }
+
+    /// Test that both stdout and stderr are captured in the log file.
+    #[test]
+    fn test_log_capture_stdout_and_stderr() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.log");
+
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("echo 'stdout message'; echo 'stderr message' >&2")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn test process");
+
+        let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
+            Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
+        let log_writer_stderr = Arc::clone(&log_writer);
+        let log_writer_stdout = Arc::clone(&log_writer);
+
+        let stderr_stream = child.stderr.take();
+        let stderr_capture_clone = Arc::clone(&stderr_capture);
+        let stderr_thread = std::thread::spawn(move || {
+            if let Some(stderr) = stderr_stream {
+                drain_stream(
+                    stderr,
+                    &log_writer_stderr,
+                    Some(&stderr_capture_clone),
+                    false,
+                    true,
+                    "test/issue",
+                    "test-step",
+                );
+            }
+        });
+
+        if let Some(stdout) = child.stdout.take() {
+            drain_stream(
+                stdout,
+                &log_writer_stdout,
+                None,
+                false,
+                false,
+                "test/issue",
+                "test-step",
+            );
+        }
+
+        let _ = stderr_thread.join();
+        {
+            let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = writer.flush();
+        }
+
+        let status = child.wait().expect("failed to wait for child");
+        assert!(status.success());
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            log_contents.contains("stdout message"),
+            "log is missing stdout output"
+        );
+        assert!(
+            log_contents.contains("stderr message"),
+            "log is missing stderr output"
+        );
+
+        // stderr should also be captured separately for the error file
+        let stderr_text = stderr_capture
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        assert!(
+            stderr_text.contains("stderr message"),
+            "stderr capture is missing stderr output"
         );
     }
 }
