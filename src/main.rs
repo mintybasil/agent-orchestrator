@@ -48,10 +48,6 @@ async fn main() {
         }
     };
 
-    let total_triggers: usize = configs.iter().map(|c| c.triggers.len()).sum();
-    let total_steps: usize = configs.iter().map(|c| c.steps.len()).sum();
-    let total_repos: usize = configs.iter().map(|c| c.repos.len()).sum();
-
     // Use the compact formatter so span fields (profile, issue, step_name)
     // appear on every event line, making it easy to tell which issue
     // produced each log line when multiple run concurrently.
@@ -128,11 +124,8 @@ async fn main() {
     };
 
     tracing::info!(
-        "agent-orchestrator starting: {} workflows, {} repos, {} triggers, {} workflow steps, poll every {}s, concurrency {}, data_dir={}",
+        "agent-orchestrator starting: workflows={}, poll interval={}s, concurrent={}, data_dir={}",
         configs.len(),
-        total_repos,
-        total_triggers,
-        total_steps,
         cli.interval,
         concurrency_msg,
         data_root.display()

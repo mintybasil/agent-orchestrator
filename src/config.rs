@@ -200,8 +200,9 @@ mod tests {
 
     #[test]
     fn explicit_interval_is_respected() {
-        let cli = Cli::try_parse_from(["agent-orchestrator", "--workflows", ".", "--interval", "30"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["agent-orchestrator", "--workflows", ".", "--interval", "30"])
+                .unwrap();
         assert_eq!(cli.interval, 30);
     }
 

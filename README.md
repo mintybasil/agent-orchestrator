@@ -1,26 +1,21 @@
 # agent-orchestrator
 
-A lightweight Rust daemon that polls GitHub for open issues assigned to a
-configured user and runs a multi-step agent workflow against each one using
-[Hermes](https://github.com/mintybasil/hermes) (or any compatible CLI agent).
+A lightweight Rust daemon with configurable triggers to initiate multi-step agent workflow against each one using an 
+agent harness
+([Hermes](https://github.com/mintybasil/hermes), or any compatible CLI agent harness).
 
 ## How it works
 
-1. On each poll tick the daemon calls the GitHub Issues API for every configured
-   repo, filtering by assignee and `state=open`.
-2. New issues (not yet completed or in-flight) are dispatched concurrently as
+1. On each poll tick the daemon calls the GitHub API for every configured
+   trigger.
+2. New events are dispatched concurrently as
    tokio tasks, gated by an optional concurrency limit.
-3. Each issue runs through the configured workflow steps sequentially by invoking
-   `hermes chat` as a subprocess with a rendered prompt.
-4. Step outputs are written to `<data-dir>/{owner}/{repo}/{issue_number}/` and
-   validated (non-empty file check) before the next step starts.
-5. Completed issue keys are persisted to `<data-dir>/completed.json` so they survive
-   restarts. Failed issues are written to `<data-dir>/failed.json` with a timestamp
-   and error message, and are not retried within the same daemon run.
+3. Each event runs through the configured workflow steps sequentially by invoking
+   the agent harness as a subprocess with a rendered prompt.
 
 ## Requirements
 
-- Rust 1.75+ (2021 edition)
+- Rust 1.90+ (2024 edition)
 - `hermes` binary on `PATH`
 - A GitHub personal access token with `repo` read scope
 
@@ -59,11 +54,7 @@ harness = { type = "hermes", profile = "cto" }
 name = "implement"
 prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary to {{output_path}}/step_01_implement.md."
 harness = { type = "hermes", profile = "cto" }
-```
 
-### Git configuration
-
-```toml
 [git]
 clone = true           # Clone/pull the repo (default: true)
 worktree = false       # Per-issue worktrees (default: false; requires clone = true)
@@ -139,6 +130,13 @@ export GITHUB_TOKEN=***
 | `--data-dir <DIR>` | `~/.agent-orchestrator` | Data directory for logs and state |
 | `--show-logs` | off | Print harness stdout/stderr to terminal in addition to log files |
 
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GITHUB_TOKEN` | — | GitHub API auth (required) |
+| `RUST_LOG` | `info` | Log level passed to `tracing-subscriber` |
+
 The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
 
 On startup the daemon validates:
@@ -165,14 +163,3 @@ Any validation failure exits with a descriptive error message.
         ├── step_NN_<name>.error # stderr on failure only
         └── step_NN_<name>.md    # Step output files written by hermes
 ```
-
-## Environment variables
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `GITHUB_TOKEN` | — | GitHub API auth (required) |
-| `RUST_LOG` | `info` | Log level passed to `tracing-subscriber` |
-
-## License
-
-MIT
