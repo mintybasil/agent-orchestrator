@@ -270,8 +270,7 @@ mod tests {
             .expect("failed to spawn test process");
 
         let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-        let log_file =
-            std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
         let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
             Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
         let log_writer_clone = Arc::clone(&log_writer);
@@ -342,8 +341,7 @@ mod tests {
             .spawn()
             .expect("failed to spawn test process");
 
-        let log_file =
-            std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
         let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
             Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
         let log_writer_clone = Arc::clone(&log_writer);
@@ -387,8 +385,14 @@ mod tests {
         assert!(status.success());
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap();
-        assert!(log_contents.contains("first line"), "log is missing 'first line'");
-        assert!(log_contents.contains("second line"), "log is missing 'second line'");
+        assert!(
+            log_contents.contains("first line"),
+            "log is missing 'first line'"
+        );
+        assert!(
+            log_contents.contains("second line"),
+            "log is missing 'second line'"
+        );
         assert!(
             log_contents.contains("no trailing newline"),
             "log is missing partial last line 'no trailing newline'"
@@ -410,8 +414,7 @@ mod tests {
             .expect("failed to spawn test process");
 
         let stderr_capture: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-        let log_file =
-            std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
         let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
             Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
         let log_writer_stderr = Arc::clone(&log_writer);
@@ -455,8 +458,14 @@ mod tests {
         assert!(status.success());
 
         let log_contents = std::fs::read_to_string(&log_path).unwrap();
-        assert!(log_contents.contains("stdout message"), "log is missing stdout output");
-        assert!(log_contents.contains("stderr message"), "log is missing stderr output");
+        assert!(
+            log_contents.contains("stdout message"),
+            "log is missing stdout output"
+        );
+        assert!(
+            log_contents.contains("stderr message"),
+            "log is missing stderr output"
+        );
 
         // stderr should also be captured separately for the error file
         let stderr_text = stderr_capture
