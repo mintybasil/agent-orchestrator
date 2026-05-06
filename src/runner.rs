@@ -19,7 +19,7 @@ pub struct EventKey {
     /// Used for data directory paths — not for display.
     pub number: u64,
     /// Human-readable label for logging (e.g. "acme/project#42" for issues,
-    /// "acme/project#99_review1234567" for PR reviews).
+    /// "acme/project#99_review-1234567" for PR reviews).
     pub label: String,
     /// Trigger-specific template variables carried from the TriggerEvent.
     pub variables: HashMap<String, String>,
