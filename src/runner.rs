@@ -35,6 +35,8 @@ struct StepContext {
     error_path: PathBuf,
     show_logs: bool,
     log_path: PathBuf,
+    /// Path to write the rendered prompt for auditing/debugging.
+    prompt_path: PathBuf,
     /// The directory from which the harness should be invoked.
     /// This may be the worktree, the repo, or the event workspace.
     work_dir: PathBuf,
@@ -208,11 +210,15 @@ async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
         let log_path = ctx
             .workspace_dir
             .join(format!("step_{:02}_{}.log", idx, step.name));
+        let prompt_path = ctx
+            .workspace_dir
+            .join(format!("step_{:02}_{}.prompt", idx, step.name));
 
         let step_ctx = StepContext {
             error_path,
             show_logs: ctx.show_logs,
             log_path,
+            prompt_path,
             work_dir: ctx.harness_work_dir.clone(),
             key: ctx.key.clone(),
             token: ctx.token.clone(),
@@ -240,6 +246,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 
     let harness = step.harness.build();
     let rendered_prompt = render(&step.prompt_template, vars);
+
+    // Write the rendered prompt to the workspace for auditing/debugging.
+    fs::write(&ctx.prompt_path, &rendered_prompt)
+        .map_err(|e| anyhow::anyhow!("failed to write prompt log: {}", e))?;
 
     tracing::info!("Launching {} harness", harness.name());
     harness
@@ -306,6 +316,9 @@ fn cleanup_worktree(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
     #[test]
     fn branch_name_sanitizes_slashes_and_hashes() {
         // Event labels like "acme/project#42" must become valid git branch names.
@@ -327,5 +340,46 @@ mod tests {
         // Git branch names cannot contain spaces, control chars, or certain special chars.
         // The ao/ prefix and sanitized label + timestamp should be safe.
         assert!(!branch.contains(' '));
+    }
+
+    #[test]
+    fn prompt_path_follows_step_naming_convention() {
+        // Verify that prompt_path uses the same naming pattern as error_path and log_path.
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let prompt_path = workspace_dir.join(format!("step_{:02}_{}.prompt", 0, "triage"));
+        assert_eq!(
+            prompt_path,
+            PathBuf::from("/tmp/workspace/step_00_triage.prompt")
+        );
+    }
+
+    #[test]
+    fn prompt_file_is_written_with_rendered_content() {
+        // Verify that fs::write to prompt_path stores the rendered prompt content.
+        let tmp = tempfile::tempdir().unwrap();
+        let prompt_path = tmp.path().join("step_00_triage.prompt");
+        let rendered = "Triage issue #42 for acme/project.";
+        fs::write(&prompt_path, rendered).unwrap();
+        let read_back = fs::read_to_string(&prompt_path).unwrap();
+        assert_eq!(read_back, rendered);
+    }
+
+    #[test]
+    fn render_with_template_vars_matches_prompt_file() {
+        // End-to-end: render a template and verify it round-trips through fs::write.
+        let mut vars: HashMap<String, String> = HashMap::new();
+        vars.insert("owner".to_string(), "acme".to_string());
+        vars.insert("repo".to_string(), "project".to_string());
+        vars.insert("issue_number".to_string(), "42".to_string());
+
+        let template = "Triage {{owner}}/{{repo}}#{{issue_number}}";
+        let rendered = render(template, &vars);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let prompt_path = tmp.path().join("step_00_triage.prompt");
+        fs::write(&prompt_path, &rendered).unwrap();
+
+        let read_back = fs::read_to_string(&prompt_path).unwrap();
+        assert_eq!(read_back, "Triage acme/project#42");
     }
 }
