@@ -36,7 +36,7 @@ src/
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
-  poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support
+  poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
   template.rs   -- {{key}} placeholder renderer + unit tests
   trigger.rs    -- Generalized trigger trait + TriggerConfig enum
@@ -113,6 +113,33 @@ Adding a new harness:
 2. Add a struct implementing `Harness`
 3. Add a match arm in `HarnessConfig::build()`
 4. (Optional) Add a startup validation in `main.rs`
+
+### Hot-reload
+
+The poll loop watches the `--workflows` directory for changes to `.toml` files.
+On each tick, it compares file modification times (mtimes) against the previously
+recorded state. If files were added, removed, or modified, all configs are
+reparsed and `WorkflowEntry` structs are rebuilt.
+
+Key functions in `src/poller.rs`:
+- `load_workflow_entries()` — parses all `.toml` files from the workflows directory,
+  builds `WorkflowEntry` list + file mtime map
+- `load_workflow_entries_if_changed()` — compares current directory state against
+  a previous mtime snapshot; returns `Reload(new_entries, new_state)`, `Unchanged`,
+  or `Error`
+- `ReloadDecision` enum — models the three outcomes of a hot-reload check
+
+**In-flight workflows are unaffected**: Running tasks hold `Arc<>` references
+which are immutable. A config reload creates new entries; existing spawned
+tasks continue with their original steps/repos/git_config.
+
+**Error resilience**: If reparsing fails (e.g., a malformed TOML file), the
+previous valid config is kept and an error is logged. The daemon never crashes
+due to a bad config file being dropped into the workflows directory.
+
+**Startup validation**: On startup, `Config::load_all()` still runs to fail fast
+on invalid configs. The poll loop's hot-reload is only for subsequent changes
+after the daemon is already running.
 
 ## Data directory layout
 
@@ -208,7 +235,8 @@ Before the first step runs, the orchestrator clones the target repo into
 ## Extending the workflow
 
 Workflow steps live in your config file as `[[steps]]` tables — no recompile
-needed. Edit the config and restart the daemon.
+needed. Edit the config and the daemon picks up changes automatically on the
+next poll tick; no restart required.
 
 To run additional workflows, add more `.toml` files to the `--workflows`
 directory. Each file is loaded as an independent workflow config:
