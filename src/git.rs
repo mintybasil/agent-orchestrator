@@ -177,6 +177,25 @@ fn ensure_initial_commit(
         .output()
         .context("failed to spawn git add")?;
 
+    // Set a local git identity for the commit.  The runner (or user's
+    // machine) may not have a global git identity configured, and
+    // `git commit` will fail without one.
+    git_command(token, current_exe)
+        .args([
+            "config",
+            "user.email",
+            "orchestrator@agent-orchestrator.local",
+        ])
+        .current_dir(repo)
+        .output()
+        .context("failed to spawn git config user.email")?;
+
+    git_command(token, current_exe)
+        .args(["config", "user.name", "agent-orchestrator"])
+        .current_dir(repo)
+        .output()
+        .context("failed to spawn git config user.name")?;
+
     let commit = git_command(token, current_exe)
         .args(["commit", "-m", "Initial commit by agent-orchestrator"])
         .current_dir(repo)
