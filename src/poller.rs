@@ -47,9 +47,13 @@ pub async fn run_poll_loop(
     // Track workflow file timestamps so we only reload when something changes.
     // Initial load — failure is fatal because the daemon can't run without
     // any valid workflows.
-    let (mut workflow_entries, mut last_file_state) =
-        load_workflow_entries(workflows_dir).map_err(|e| {
-            tracing::error!("failed to load workflow configs from {}: {}", workflows_dir.display(), e);
+    let (mut workflow_entries, mut last_file_state) = load_workflow_entries(workflows_dir)
+        .map_err(|e| {
+            tracing::error!(
+                "failed to load workflow configs from {}: {}",
+                workflows_dir.display(),
+                e
+            );
             e
         })?;
 
@@ -86,7 +90,10 @@ pub async fn run_poll_loop(
             ReloadDecision::Unchanged => {}
             ReloadDecision::Error(e) => {
                 // Keep using the previous valid config rather than crashing.
-                tracing::error!("failed to reload workflow configs: {} — keeping previous config", e);
+                tracing::error!(
+                    "failed to reload workflow configs: {} — keeping previous config",
+                    e
+                );
             }
         }
 
