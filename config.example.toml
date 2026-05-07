@@ -53,7 +53,7 @@ repo = "your-repo"
 # Executed sequentially for each triggered issue.
 # Template placeholders:
 #   {{owner}}, {{repo}}, {{issue_number}}, {{output_path}},
-#   {{repo_path}} (path to the base repo clone; empty when git.clone = false)
+#   {{default_branch}}, {{repo_path}} (path to the base repo clone; empty when git.clone = false)
 
 [[steps]]
 name = "triage"

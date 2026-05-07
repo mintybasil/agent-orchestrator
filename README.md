@@ -83,6 +83,7 @@ hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider
 |---|---|
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
+| `{{default_branch}}` | Default branch from git config (e.g. `main`) |
 | `{{issue_number}}` | GitHub issue number |
 | `{{output_path}}` | Full path where this step must write its output (under `<data-dir>/{owner}/{repo}/{issue_number}/`) |
 | `{{repo_path}}` | Path to the base repo clone; empty when `git.clone = false` |

@@ -270,6 +270,7 @@ type = "push_code"
 |---|---|
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
+| `{{default_branch}}` | Default branch from git config (e.g. `main`) |
 | `{{issue_number}}` | GitHub issue number |
 | `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
 | `{{repo_path}}` | Path to the base repository clone (`<data-dir>/<owner>/<repo>/repo/`); empty string when `git.clone = false` |

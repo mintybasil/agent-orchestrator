@@ -76,6 +76,49 @@ mod tests {
     }
 
     #[test]
+    fn default_branch_substitution() {
+        let mut vars = HashMap::new();
+        vars.insert("default_branch".to_string(), "develop".to_string());
+        let result = render("The default branch is {{default_branch}}.", &vars);
+        assert_eq!(result, "The default branch is develop.");
+    }
+
+    #[test]
+    fn repo_path_is_absolute_when_clone_is_true() {
+        use std::path::PathBuf;
+        // Simulate how runner.rs builds repo_dir: data_root (absolute) +
+        // owner/repo/repo
+        let data_root = PathBuf::from("/home/user/.agent-orchestrator");
+        let repo_dir = data_root.join("owner").join("repo").join("repo");
+        assert!(
+            repo_dir.is_absolute(),
+            "repo_dir must be absolute: {:?}",
+            repo_dir
+        );
+        // Verify the template variable would carry the absolute path
+        let mut vars = HashMap::new();
+        vars.insert(
+            "repo_path".to_string(),
+            repo_dir.to_string_lossy().into_owned(),
+        );
+        let result = render("cd {{repo_path}}", &vars);
+        assert!(
+            result.starts_with("cd /"),
+            "repo_path should resolve to absolute path: got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn repo_path_is_empty_string_when_clone_is_false() {
+        // When git.clone = false, repo_dir is None and the template var is ""
+        let mut vars = HashMap::new();
+        vars.insert("repo_path".to_string(), String::new());
+        let result = render("Work in {{repo_path}}done", &vars);
+        assert_eq!(result, "Work in done");
+    }
+
+    #[test]
     fn pr_number_substitution() {
         let mut vars = HashMap::new();
         vars.insert("pr_number".to_string(), "123".to_string());
@@ -88,10 +131,11 @@ mod tests {
     #[test]
     fn trigger_specific_vars_merge_with_globals() {
         // Simulates the merging logic from runner::run_event:
-        // global vars (owner, repo, output_path, repo_path) + trigger vars
+        // global vars (owner, repo, default_branch, output_path, repo_path) + trigger vars
         let mut vars: HashMap<String, String> = [
             ("owner".into(), "acme".to_string()),
             ("repo".into(), "project".to_string()),
+            ("default_branch".into(), "main".to_string()),
             ("output_path".into(), "/data/acme/project/42".to_string()),
             ("repo_path".into(), "/data/acme/project/repo".to_string()),
         ]

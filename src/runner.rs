@@ -144,6 +144,7 @@ pub async fn run_workflow(
     let mut vars: HashMap<String, String> = [
         ("owner".into(), key.owner.clone()),
         ("repo".into(), key.repo.clone()),
+        ("default_branch".into(), git_config.default_branch.clone()),
         (
             "output_path".into(),
             workspace_dir.clone().to_string_lossy().into_owned(),

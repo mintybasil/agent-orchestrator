@@ -22,7 +22,7 @@ assigned_to = "zeroklaw"
 allowed_users = ["mintybasil", "zeroklaw"]
 
 # Workflow steps executed sequentially for each assigned issue.
-# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{step_N_output}}
+# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{output_path}}, {{default_branch}}, {{repo_path}}, {{step_N_output}}
 
 [[steps]]
 name = "Plan"
