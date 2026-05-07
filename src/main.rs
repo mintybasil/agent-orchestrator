@@ -40,13 +40,11 @@ async fn main() {
     let cli = Cli::parse();
 
     // Load all workflow configs from the --workflows directory
-    let configs = match config::Config::load_all(&cli.workflows) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("ERROR: {e}");
-            std::process::exit(1);
-        }
-    };
+    // (validated at startup; hot-reloaded by the poll loop on changes).
+    if let Err(e) = config::Config::load_all(&cli.workflows) {
+        eprintln!("ERROR: {e}");
+        std::process::exit(1);
+    }
 
     // Use the compact formatter so span fields (profile, issue, step_name)
     // appear on every event line, making it easy to tell which issue
@@ -124,8 +122,8 @@ async fn main() {
     };
 
     tracing::info!(
-        "agent-orchestrator starting: workflows={}, poll interval={}s, concurrent={}, data_dir={}",
-        configs.len(),
+        "agent-orchestrator starting: workflows_dir={}, poll interval={}s, concurrent={}, data_dir={}",
+        cli.workflows.display(),
         cli.interval,
         concurrency_msg,
         data_root.display()
@@ -172,7 +170,7 @@ async fn main() {
     });
 
     if let Err(e) = poller::run_poll_loop(
-        configs,
+        &cli.workflows,
         token,
         &data_root,
         completed,
