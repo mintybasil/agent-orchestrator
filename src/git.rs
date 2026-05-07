@@ -138,7 +138,7 @@ fn is_repo_empty(repo: &Path, token: &str, current_exe: &Path) -> bool {
 /// can be created. Without at least one commit, `git worktree add -b
 /// <branch> <path> <base>` fails because `base` is not a valid ref.
 ///
-/// The commit creates a `.gitkeep` file on the default branch.
+/// Uses `--allow-empty` so no sentinel file is needed.
 fn ensure_initial_commit(
     repo: &Path,
     default_branch: &str,
@@ -168,36 +168,16 @@ fn ensure_initial_commit(
         );
     }
 
-    // Create a sentinel file so we have something to commit.
-    std::fs::write(repo.join(".gitkeep"), "")?;
-
-    git_command(token, current_exe)
-        .args(["add", ".gitkeep"])
-        .current_dir(repo)
-        .output()
-        .context("failed to spawn git add")?;
-
-    // Set a local git identity for the commit.  The runner (or user's
-    // machine) may not have a global git identity configured, and
-    // `git commit` will fail without one.
-    git_command(token, current_exe)
-        .args([
-            "config",
-            "user.email",
-            "orchestrator@agent-orchestrator.local",
-        ])
-        .current_dir(repo)
-        .output()
-        .context("failed to spawn git config user.email")?;
-
-    git_command(token, current_exe)
-        .args(["config", "user.name", "agent-orchestrator"])
-        .current_dir(repo)
-        .output()
-        .context("failed to spawn git config user.name")?;
-
+    // Create an empty commit so the default branch has a valid ref.
+    // No identity is set — if none is configured, git commit will fail
+    // with a clear error, which is the correct behaviour.
     let commit = git_command(token, current_exe)
-        .args(["commit", "-m", "Initial commit by agent-orchestrator"])
+        .args([
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Initial commit by agent-orchestrator",
+        ])
         .current_dir(repo)
         .output()
         .context("failed to spawn git commit")?;
@@ -533,10 +513,25 @@ mod tests {
     fn create_worktree_succeeds_on_empty_repo() {
         // This is the core regression test for issue #84:
         // `git worktree add -b <branch> <path> main` fails on an empty repo
-        // because `main` is not a valid ref yet.  The fix seeds an initial
-        // commit before creating the worktree.
+        // because `main` is not a valid ref yet.  The fix seeds an empty
+        // initial commit (--allow-empty) before creating the worktree.
         let tmp = tempfile::tempdir().unwrap();
         make_empty_repo(tmp.path());
+
+        // Set a local git identity in the test repo so that git commit can
+        // succeed.  The production code intentionally does NOT set an identity
+        // — if no identity is configured, the commit fails with a clear
+        // error.  Tests must provide their own.
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git config user.email");
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git config user.name");
 
         let wt_path = tmp.path().join("worktree-1");
         let branch = "ao/test-worktree-1";
@@ -556,9 +551,11 @@ mod tests {
             result.err()
         );
         assert!(wt_path.exists(), "worktree directory was not created");
+        // The initial commit is empty (no .gitkeep), so we just verify the
+        // repo is no longer considered empty.
         assert!(
-            wt_path.join(".gitkeep").exists(),
-            "initial .gitkeep not found in worktree"
+            !is_repo_empty(tmp.path(), &fake_token(), &fake_exe()),
+            "repo should not be empty after ensure_initial_commit"
         );
 
         // Clean up the worktree so the temp dir can be removed.
