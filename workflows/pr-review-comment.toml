@@ -4,6 +4,7 @@ repos = [
     {owner = "zerokrab", repo = "bento-hancho"},
     {owner = "zerokrab", repo = "bento-bench"},
     {owner = "zerokrab", repo = "boundless-profit-explorer"},
+    {owner = "zerokrab", repo = "bento-bench-autorun"},
     {owner = "mintybasil", repo = "agent-orchestrator"},
     {owner = "mintybasil", repo = "mintybasil.dev"},
     {owner = "mintybasil", repo = "agent-vms-ansible"},
