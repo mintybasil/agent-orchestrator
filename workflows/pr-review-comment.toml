@@ -8,6 +8,7 @@ repos = [
     {owner = "mintybasil", repo = "agent-orchestrator"},
     {owner = "mintybasil", repo = "mintybasil.dev"},
     {owner = "mintybasil", repo = "agent-vms-ansible"},
+    {owner = "mintybasil", repo = "gha-runners"},
 ]
 
 [git]
