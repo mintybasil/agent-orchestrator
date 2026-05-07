@@ -119,11 +119,108 @@ fn pull_default_branch(
     }
 }
 
+/// Check whether a repository has any commits (i.e. has an unborn HEAD).
+///
+/// Returns `true` if the repo is empty (no commits on any branch).
+fn is_repo_empty(repo: &Path, token: &str, current_exe: &Path) -> bool {
+    let output = git_command(token, current_exe)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .current_dir(repo)
+        .output();
+
+    match output {
+        Ok(o) => !o.status.success(),
+        Err(_) => true,
+    }
+}
+
+/// Create an initial commit in an empty repository so that branches
+/// can be created. Without at least one commit, `git worktree add -b
+/// <branch> <path> <base>` fails because `base` is not a valid ref.
+///
+/// Uses `--allow-empty` so no sentinel file is needed.
+fn ensure_initial_commit(
+    repo: &Path,
+    default_branch: &str,
+    token: &str,
+    current_exe: &Path,
+) -> anyhow::Result<()> {
+    tracing::info!("Repository is empty — creating initial commit");
+
+    // Rename the current branch to the desired default branch.
+    // In a freshly cloned empty repo the remote creates an orphan HEAD
+    // that typically points to a branch called "main" (or "master"), but
+    // the local ref may not exist yet.  `git checkout -B` forces the
+    // branch name regardless.
+    let checkout = git_command(token, current_exe)
+        .args(["checkout", "-B", default_branch])
+        .current_dir(repo)
+        .output()
+        .context("failed to spawn git checkout -B")?;
+
+    if !checkout.status.success() {
+        let stderr = String::from_utf8_lossy(&checkout.stderr);
+        anyhow::bail!(
+            "git checkout -B {} failed (exit code {:?}): {}",
+            default_branch,
+            checkout.status.code(),
+            scrub_credentials(&stderr)
+        );
+    }
+
+    // Create an empty commit so the default branch has a valid ref.
+    // No identity is set — if none is configured, git commit will fail
+    // with a clear error, which is the correct behaviour.
+    let commit = git_command(token, current_exe)
+        .args([
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Initial commit by agent-orchestrator",
+        ])
+        .current_dir(repo)
+        .output()
+        .context("failed to spawn git commit")?;
+
+    if !commit.status.success() {
+        let stderr = String::from_utf8_lossy(&commit.stderr);
+        anyhow::bail!(
+            "git commit failed (exit code {:?}): {}",
+            commit.status.code(),
+            scrub_credentials(&stderr)
+        );
+    }
+
+    // Push the initial commit so the remote also has the branch.
+    let push = git_command(token, current_exe)
+        .args(["push", "origin", default_branch])
+        .current_dir(repo)
+        .output()
+        .context("failed to spawn git push")?;
+
+    if !push.status.success() {
+        let stderr = String::from_utf8_lossy(&push.stderr);
+        tracing::warn!(
+            error = %scrub_credentials(&stderr),
+            "git push of initial commit failed; worktree will still work locally"
+        );
+        // Non-fatal: the local branch now exists so worktree creation will
+        // succeed.  The agent's harness step may push later anyway.
+    }
+
+    tracing::info!("Initial commit created on branch '{}'", default_branch);
+    Ok(())
+}
+
 /// Create a git worktree at `path` based on `base`.
 ///
 /// The worktree is created on a new unique branch (`branch`) starting
 /// from `base`. This avoids the git restriction that prevents a
 /// worktree from sharing the same branch as the main clone.
+///
+/// If the repository is empty (no commits), an initial commit is created
+/// on the default branch first so that the worktree has a valid ref to
+/// start from.
 ///
 /// Returns the name of the created branch so it can be cleaned up later.
 #[instrument(skip(token, current_exe), parent = None)]
@@ -140,6 +237,13 @@ pub fn create_worktree(
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+    }
+
+    // If the repo is empty (no commits), we need to seed it with an
+    // initial commit before we can create a worktree that references
+    // `base` — otherwise git emits "fatal: invalid reference: <base>".
+    if is_repo_empty(repo, token, current_exe) {
+        ensure_initial_commit(repo, base, token, current_exe)?;
     }
 
     let output = git_command(token, current_exe)
@@ -339,5 +443,171 @@ mod tests {
         let parts: Vec<&str> = path.splitn(2, '/').collect();
         assert_eq!(parts[0], "zerokrab");
         assert_eq!(parts[1], "bento-hancho");
+    }
+
+    // --- Empty repo / worktree tests ---
+
+    /// Helper: create a bare-ish repo with NO commits (simulates a freshly
+    /// created GitHub repo that has been cloned via `git clone`).
+    fn make_empty_repo(dir: &Path) {
+        let status = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .output()
+            .expect("git init")
+            .status;
+        assert!(status.success(), "git init failed");
+    }
+
+    /// Helper: create a repo WITH one commit on `main`.
+    fn make_repo_with_commit(dir: &Path, default_branch: &str) {
+        let status = std::process::Command::new("git")
+            .args(["init", "-b", default_branch])
+            .current_dir(dir)
+            .output()
+            .expect("git init -b")
+            .status;
+        assert!(status.success(), "git init -b failed");
+
+        std::fs::write(dir.join("README.md"), "# test").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir)
+            .output()
+            .expect("git add");
+        std::process::Command::new("git")
+            .args(["commit", "-m", "init", "--no-gpg-sign"])
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .current_dir(dir)
+            .output()
+            .expect("git commit");
+    }
+
+    // Dummy token / exe path for tests — git_command doesn't validate them;
+    // GIT_ASKPASS won't be called for local operations.
+    fn fake_token() -> String {
+        "fake-test-token".to_string()
+    }
+    fn fake_exe() -> PathBuf {
+        PathBuf::from("/usr/bin/true")
+    }
+
+    #[test]
+    fn is_repo_empty_detects_empty_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        make_empty_repo(tmp.path());
+        assert!(is_repo_empty(tmp.path(), &fake_token(), &fake_exe()));
+    }
+
+    #[test]
+    fn is_repo_empty_returns_false_for_nonempty_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        make_repo_with_commit(tmp.path(), "main");
+        assert!(!is_repo_empty(tmp.path(), &fake_token(), &fake_exe()));
+    }
+
+    #[test]
+    fn create_worktree_succeeds_on_empty_repo() {
+        // This is the core regression test for issue #84:
+        // `git worktree add -b <branch> <path> main` fails on an empty repo
+        // because `main` is not a valid ref yet.  The fix seeds an empty
+        // initial commit (--allow-empty) before creating the worktree.
+        let tmp = tempfile::tempdir().unwrap();
+        make_empty_repo(tmp.path());
+
+        // Set a local git identity in the test repo so that git commit can
+        // succeed.  The production code intentionally does NOT set an identity
+        // — if no identity is configured, the commit fails with a clear
+        // error.  Tests must provide their own.
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git config user.email");
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(tmp.path())
+            .output()
+            .expect("git config user.name");
+
+        let wt_path = tmp.path().join("worktree-1");
+        let branch = "ao/test-worktree-1";
+
+        let result = create_worktree(
+            tmp.path(),
+            &wt_path,
+            "main",
+            branch,
+            &fake_token(),
+            &fake_exe(),
+        );
+
+        assert!(
+            result.is_ok(),
+            "create_worktree failed on empty repo: {:?}",
+            result.err()
+        );
+        assert!(wt_path.exists(), "worktree directory was not created");
+        // The initial commit is empty (no .gitkeep), so we just verify the
+        // repo is no longer considered empty.
+        assert!(
+            !is_repo_empty(tmp.path(), &fake_token(), &fake_exe()),
+            "repo should not be empty after ensure_initial_commit"
+        );
+
+        // Clean up the worktree so the temp dir can be removed.
+        let _ = std::process::Command::new("git")
+            .args(["worktree", "remove", "--force"])
+            .arg(&wt_path)
+            .current_dir(tmp.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["branch", "-D", branch])
+            .current_dir(tmp.path())
+            .output();
+    }
+
+    #[test]
+    fn create_worktree_succeeds_on_nonempty_repo() {
+        // Sanity check that existing functionality still works.
+        let tmp = tempfile::tempdir().unwrap();
+        make_repo_with_commit(tmp.path(), "main");
+
+        let wt_path = tmp.path().join("worktree-1");
+        let branch = "ao/test-worktree-2";
+
+        let result = create_worktree(
+            tmp.path(),
+            &wt_path,
+            "main",
+            branch,
+            &fake_token(),
+            &fake_exe(),
+        );
+
+        assert!(
+            result.is_ok(),
+            "create_worktree failed on non-empty repo: {:?}",
+            result.err()
+        );
+        assert!(wt_path.exists(), "worktree directory was not created");
+        assert!(
+            wt_path.join("README.md").exists(),
+            "README.md not found in worktree"
+        );
+
+        // Clean up.
+        let _ = std::process::Command::new("git")
+            .args(["worktree", "remove", "--force"])
+            .arg(&wt_path)
+            .current_dir(tmp.path())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["branch", "-D", branch])
+            .current_dir(tmp.path())
+            .output();
     }
 }
