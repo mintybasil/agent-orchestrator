@@ -21,5 +21,17 @@ allowed_users = ["mintybasil"]
 
 [[steps]]
 name = "Address Review"
-prompt_template = "A review has been made on PR #{{pr_number}} in {{owner}}/{{repo}}. Please evaluate it, check if it's a comment/requested changes/approve, and respond accordingly. DO NOT assume it to be correct, validate any claims it makes. If it makes invalid claims, add a comment to explain this. If the claims are valid, push changes to the PR branch to address them. If you make any changes, please ensure the PR description is updated accordingly."
+prompt_template = """
+A review has been made on PR #{{pr_number}} in {{owner}}/{{repo}} that you need to respond to.
+
+First you should evaluate the review. DO NOT assume it to be correct, validate any claims it makes.
+
+You must respond by either:
+1) Implementing and pushing changes to address the review, and responding with a comment
+2) Respond with a comment rebutting the review, or requesting additional feedback or context.
+
+If the review has multiple parts you may do a combination of 1 and 2 if needed.
+
+If you push any changes, please ensure the PR description is updated accordingly.
+"""
 harness = { type = "hermes", profile = "swe", worktree = true }
