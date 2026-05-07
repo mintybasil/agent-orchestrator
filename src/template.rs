@@ -97,7 +97,10 @@ mod tests {
         );
         // Verify the template variable would carry the absolute path
         let mut vars = HashMap::new();
-        vars.insert("repo_path".to_string(), repo_dir.to_string_lossy().into_owned());
+        vars.insert(
+            "repo_path".to_string(),
+            repo_dir.to_string_lossy().into_owned(),
+        );
         let result = render("cd {{repo_path}}", &vars);
         assert!(
             result.starts_with("cd /"),
