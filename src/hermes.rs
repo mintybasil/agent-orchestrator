@@ -174,36 +174,53 @@ fn drain_stream(
     step: &str,
 ) {
     let mut buffer = [0u8; 8192];
+    let mut remainder = String::new();
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => break, // EOF
             Ok(n) => {
                 let chunk = String::from_utf8_lossy(&buffer[..n]);
 
-                // Write timestamped lines to log file and flush to ensure data hits disk promptly
-                {
-                    let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
-                    for line in chunk.lines() {
-                        let _ = writeln!(writer, "{}", timestamp_line(line));
-                    }
-                    let _ = writer.flush();
-                }
-
-                // Capture raw (un-timestamped) stderr for error_file on failure
+                // Capture raw (un-timestamped) stderr for error_file on failure.
+                // Always push the raw chunk, not the reconstructed text, so that
+                // the capture is byte-identical to what the process wrote.
                 if let Some(capture) = stderr_capture {
                     let mut cap = capture.lock().unwrap_or_else(|e| e.into_inner());
                     cap.push_str(&chunk);
                 }
 
-                // Trace complete lines if show_logs is enabled
-                if show_logs {
-                    for line in chunk.lines() {
-                        if is_stderr {
-                            tracing::error!(issue = %issue, step = %step, "{}", line);
-                        } else {
-                            tracing::info!(issue = %issue, step = %step, "{}", line);
+                // Prepend any leftover from the previous chunk and split at the
+                // last newline boundary. Everything up to (and including) the
+                // last newline forms complete lines ready for timestamping. The
+                // tail after the last newline is kept in `remainder` for the
+                // next iteration.
+                let current_text = remainder + &chunk;
+                if let Some(last_nl) = current_text.rfind('\n') {
+                    let lines_text = &current_text[..=last_nl];
+                    remainder = current_text[last_nl + 1..].to_string();
+
+                    // Write timestamped lines to log file and flush promptly
+                    {
+                        let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+                        for line in lines_text.lines() {
+                            let _ = writeln!(writer, "{}", timestamp_line(line));
+                        }
+                        let _ = writer.flush();
+                    }
+
+                    // Trace complete lines if show_logs is enabled
+                    if show_logs {
+                        for line in lines_text.lines() {
+                            if is_stderr {
+                                tracing::error!(issue = %issue, step = %step, "{}", line);
+                            } else {
+                                tracing::info!(issue = %issue, step = %step, "{}", line);
+                            }
                         }
                     }
+                } else {
+                    // No newline in this chunk — keep accumulating in remainder
+                    remainder = current_text;
                 }
             }
             Err(e) => {
@@ -216,6 +233,22 @@ fn drain_stream(
                     e
                 );
                 break;
+            }
+        }
+    }
+
+    // Flush any remaining partial line after EOF
+    if !remainder.is_empty() {
+        {
+            let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = writeln!(writer, "{}", timestamp_line(&remainder));
+            let _ = writer.flush();
+        }
+        if show_logs {
+            if is_stderr {
+                tracing::error!(issue = %issue, step = %step, "{}", remainder);
+            } else {
+                tracing::info!(issue = %issue, step = %step, "{}", remainder);
             }
         }
     }
@@ -531,6 +564,67 @@ mod tests {
         assert!(
             stderr_text.contains("stderr message"),
             "stderr capture is missing stderr output"
+        );
+    }
+
+    /// Regression test: verify that output spanning chunk boundaries is
+    /// captured completely, without data loss. The old `chunk.lines()`
+    /// implementation would only emit a line when a `\n` was present in
+    /// the current chunk; a long string with no newlines was silently
+    /// dropped if it exceeded the 8 KiB read buffer.
+    #[test]
+    fn test_log_capture_chunk_boundary_truncation() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("boundary.log");
+
+        // Print 10KB of data with no newlines — must span multiple 8KB read chunks
+        let long_string = "A".repeat(10_000);
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf '{}'", long_string))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn");
+
+        let log_file = std::fs::File::create(&log_path).expect("failed to create log file");
+        let log_writer: Arc<Mutex<std::io::BufWriter<std::fs::File>>> =
+            Arc::new(Mutex::new(std::io::BufWriter::new(log_file)));
+        let log_writer_clone = Arc::clone(&log_writer);
+
+        let stderr_stream = child.stderr.take();
+        let stderr_thread = std::thread::spawn(move || {
+            if let Some(stderr) = stderr_stream {
+                drain_stream(
+                    stderr,
+                    &log_writer_clone,
+                    None,
+                    false,
+                    true,
+                    "test",
+                    "step",
+                );
+            }
+        });
+
+        if let Some(stdout) = child.stdout.take() {
+            drain_stream(stdout, &log_writer, None, false, false, "test", "step");
+        }
+
+        let _ = stderr_thread.join();
+        {
+            let mut writer = log_writer.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = writer.flush();
+        }
+
+        let _ = child.wait().expect("failed to wait for child");
+
+        let log_contents = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            log_contents.contains(&long_string),
+            "Log missing data across chunk boundaries. Log length: {}, expected substring length: {}",
+            log_contents.len(),
+            long_string.len()
         );
     }
 }
