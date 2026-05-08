@@ -97,6 +97,8 @@ pub async fn run_poll_loop(
             }
         }
 
+        let mut dispatched_this_tick = 0usize;
+
         for entry in &workflow_entries {
             for trigger in &entry.triggers {
                 tracing::debug!(
@@ -178,6 +180,7 @@ pub async fn run_poll_loop(
                         .unwrap_or_else(|e| e.into_inner())
                         .insert(key_str.clone());
                     tracing::info!("[{}] dispatching workflow", event_key);
+                    dispatched_this_tick += 1;
 
                     let completed_clone = Arc::clone(&completed);
                     let in_flight_clone = Arc::clone(&in_flight);
@@ -244,6 +247,11 @@ pub async fn run_poll_loop(
                     active_tasks.push(handle);
                 }
             }
+        }
+
+        // Log idle state when no workflows are running and nothing was dispatched.
+        if is_idle(dispatched_this_tick, &in_flight) {
+            tracing::info!("Application is idle: no active workflows");
         }
 
         // Periodically clean up finished handles to avoid unbounded growth.
@@ -432,6 +440,16 @@ pub fn load_completed(data_root: &Path) -> Arc<Mutex<HashSet<String>>> {
     Arc::new(Mutex::new(set))
 }
 
+/// Returns true when no workflows were dispatched this tick and none are
+/// currently in flight — i.e., the application is idle.
+fn is_idle(dispatched_this_tick: usize, in_flight: &Arc<Mutex<HashSet<String>>>) -> bool {
+    dispatched_this_tick == 0
+        && in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,5 +610,31 @@ harness = { type = "hermes", profile = "cto" }
                 // Also acceptable — can't load entries from an empty dir.
             }
         }
+    }
+
+    #[test]
+    fn test_is_idle_when_nothing_dispatched_and_in_flight_empty() {
+        let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        assert!(is_idle(0, &in_flight));
+    }
+
+    #[test]
+    fn test_not_idle_when_dispatched_events() {
+        let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        assert!(!is_idle(1, &in_flight));
+    }
+
+    #[test]
+    fn test_not_idle_when_in_flight_workflows() {
+        let in_flight: Arc<Mutex<HashSet<String>>> =
+            Arc::new(Mutex::new(HashSet::from(["owner/repo/42".to_string()])));
+        assert!(!is_idle(0, &in_flight));
+    }
+
+    #[test]
+    fn test_not_idle_when_both_dispatched_and_in_flight() {
+        let in_flight: Arc<Mutex<HashSet<String>>> =
+            Arc::new(Mutex::new(HashSet::from(["owner/repo/42".to_string()])));
+        assert!(!is_idle(1, &in_flight));
     }
 }
