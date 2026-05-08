@@ -6,11 +6,12 @@ agent harness
 
 ## How it works
 
-1. On each poll tick the daemon calls the GitHub API for every configured
-   trigger.
-2. New events are dispatched concurrently as
+1. On each poll tick the daemon checks whether workflow config files have changed
+   and reloads them if needed (hot-reload, no restart required).
+2. The daemon calls the GitHub API for every configured trigger.
+3. New events are dispatched concurrently as
    tokio tasks, gated by an optional concurrency limit.
-3. Each event runs through the configured workflow steps sequentially by invoking
+4. Each event runs through the configured workflow steps sequentially by invoking
    the agent harness as a subprocess with a rendered prompt.
 
 ## Requirements
@@ -149,6 +150,16 @@ On startup the daemon validates:
 - `hermes` is present on `PATH`.
 
 Any validation failure exits with a descriptive error message.
+
+### Hot-reload
+
+The daemon watches the `--workflows` directory for changes. When `.toml` files are
+added, removed, or modified, the configs are automatically reparsed on the next
+poll tick — no restart needed. If a config file is malformed, the daemon keeps
+using the last valid config and logs an error; it never crashes from a bad file.
+
+In-flight workflow runs are unaffected by a config reload — they continue with
+the steps and repos they were started with.
 
 ## Data directory layout
 
