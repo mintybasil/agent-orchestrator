@@ -35,6 +35,6 @@ You must respond by either:
 
 If the review has multiple parts you may do a combination of 1 and 2 as needed.
 
-If you push any changes, please ensure the PR description is updated accordingly.
+If you push any changes, please ensure the PR description is updated accordingly and that the CI checks pass.
 """
 harness = { type = "hermes", profile = "swe", worktree = true }
