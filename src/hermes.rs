@@ -595,15 +595,7 @@ mod tests {
         let stderr_stream = child.stderr.take();
         let stderr_thread = std::thread::spawn(move || {
             if let Some(stderr) = stderr_stream {
-                drain_stream(
-                    stderr,
-                    &log_writer_clone,
-                    None,
-                    false,
-                    true,
-                    "test",
-                    "step",
-                );
+                drain_stream(stderr, &log_writer_clone, None, false, true, "test", "step");
             }
         });
 
