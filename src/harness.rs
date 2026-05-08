@@ -26,7 +26,7 @@ pub struct LogConfig {
 /// `Hermes` has `profile`, `provider`, and `model`,
 /// because those are hermes CLI flags — not generic step concerns.
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HarnessConfig {
     /// Invoke the hermes CLI agent.
     ///
@@ -143,5 +143,30 @@ profile = "cto"
         };
         let harness = config.build();
         assert_eq!(harness.name(), "hermes");
+    }
+
+    #[test]
+    fn hermes_config_rejects_unknown_fields() {
+        // Ensures that misspelled or misplaced fields like `worktree` in the
+        // harness config produce a clear error instead of being silently ignored.
+        let toml = r#"
+type = "hermes"
+profile = "cto"
+worktree = true
+"#;
+        let result = toml::from_str::<HarnessConfig>(toml);
+        assert!(
+            result.is_err(),
+            "expected unknown field 'worktree' to be rejected"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown field"),
+            "error should mention 'unknown field', got: {err}"
+        );
+        assert!(
+            err.contains("worktree"),
+            "error should mention the unknown field name, got: {err}"
+        );
     }
 }
