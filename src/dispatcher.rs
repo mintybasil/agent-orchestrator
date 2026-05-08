@@ -73,10 +73,7 @@ impl Dispatcher {
     /// Run the dispatch loop, consuming messages from `rx`.
     ///
     /// Returns when the sender side is dropped (i.e. the poller has shut down).
-    pub async fn run(
-        self,
-        mut rx: tokio::sync::mpsc::Receiver<DispatchMessage>,
-    ) {
+    pub async fn run(self, mut rx: tokio::sync::mpsc::Receiver<DispatchMessage>) {
         let mut active_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
         while let Some(msg) = rx.recv().await {
