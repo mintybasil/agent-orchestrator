@@ -1,49 +1,28 @@
 use anyhow::Result;
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use tokio::sync::Semaphore;
 use tokio::time::{Duration, interval};
 
 use crate::config::Config;
-use crate::runner::{EventKey, run_workflow};
+use crate::dispatcher::DispatchMessage;
+use crate::runner::EventKey;
 use crate::trigger::Trigger;
 use crate::workflow;
 
-#[derive(Serialize, Deserialize)]
-struct FailedEntry {
-    key: String,
-    timestamp: String,
-    error: String,
-}
-
-#[allow(clippy::too_many_arguments)]
+/// Run the poll loop: discover events and dispatch them via the channel.
+///
+/// The poller is the producer; the dispatcher (consuming from `tx`) is the
+/// consumer that actually spawns workflow tasks.
 pub async fn run_poll_loop(
     workflows_dir: &Path,
     token: String,
-    data_root: &Path,
     completed: Arc<Mutex<HashSet<String>>>,
-    current_exe: &Path,
-    show_logs: bool,
-    concurrency_limit: usize,
+    tx: tokio::sync::mpsc::Sender<DispatchMessage>,
     poll_interval_secs: u64,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let permanently_failed: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let file_lock: Arc<std::sync::Mutex<()>> = Arc::new(std::sync::Mutex::new(()));
-
-    // When limit is 0, treat as unlimited. Use a large semaphore permit count
-    // (usize::MAX) so acquisition never blocks.
-    let semaphore = Arc::new(Semaphore::new(if concurrency_limit == 0 {
-        usize::MAX
-    } else {
-        concurrency_limit
-    }));
-
     // Track workflow file timestamps so we only reload when something changes.
     // Initial load — failure is fatal because the daemon can't run without
     // any valid workflows.
@@ -57,7 +36,6 @@ pub async fn run_poll_loop(
             e
         })?;
 
-    let mut active_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let mut ticker = interval(Duration::from_secs(poll_interval_secs));
 
     loop {
@@ -96,8 +74,6 @@ pub async fn run_poll_loop(
                 );
             }
         }
-
-        let mut dispatched_this_tick = 0usize;
 
         for entry in &workflow_entries {
             for trigger in &entry.triggers {
@@ -157,119 +133,23 @@ pub async fn run_poll_loop(
                     {
                         continue;
                     }
-                    // Skip if permanently failed this run
-                    if permanently_failed
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .contains(&key_str)
-                    {
-                        continue;
+
+                    // Send to dispatcher — skip only on channel closed
+                    // (the in_flight and permanently_failed checks happen in the dispatcher).
+                    let msg = DispatchMessage {
+                        event_key,
+                        steps: Arc::clone(&entry.steps),
+                        git_config: entry.git_config.clone(),
+                    };
+
+                    if tx.send(msg).await.is_err() {
+                        tracing::info!("Dispatcher channel closed, stopping poll loop");
+                        return Ok(());
                     }
-                    // Skip if in-flight
-                    if in_flight
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .contains(&key_str)
-                    {
-                        continue;
-                    }
-
-                    // Mark in-flight and spawn
-                    in_flight
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(key_str.clone());
-                    tracing::info!("[{}] dispatching workflow", event_key);
-                    dispatched_this_tick += 1;
-
-                    let completed_clone = Arc::clone(&completed);
-                    let in_flight_clone = Arc::clone(&in_flight);
-                    let permanently_failed_clone = Arc::clone(&permanently_failed);
-                    let file_lock_clone = Arc::clone(&file_lock);
-                    let data_root_clone = data_root.to_path_buf();
-                    let key_str_clone = key_str.clone();
-                    let token_clone = token.clone();
-                    let current_exe_clone = current_exe.to_path_buf();
-                    let show_logs_clone = show_logs;
-                    let failed_path = data_root.join("failed.json");
-                    let completed_path = data_root.join("completed.json");
-                    let steps_clone = Arc::clone(&entry.steps);
-                    let git_config_clone = entry.git_config.clone();
-                    let sem_clone = Arc::clone(&semaphore);
-
-                    let handle = tokio::spawn(async move {
-                        // Acquire semaphore permit — blocks if at capacity.
-                        let _permit = sem_clone.acquire().await.expect("semaphore not closed");
-
-                        let result = run_workflow(
-                            &event_key,
-                            &data_root_clone,
-                            &steps_clone,
-                            &token_clone,
-                            &current_exe_clone,
-                            show_logs_clone,
-                            &git_config_clone,
-                        )
-                        .await;
-                        // Permit dropped here, freeing a slot.
-
-                        in_flight_clone
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .remove(&key_str_clone);
-
-                        match result {
-                            Ok(()) => {
-                                tracing::info!("[{}] workflow completed", event_key);
-                                // Add to completed set and persist
-                                completed_clone
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .insert(key_str_clone.clone());
-                                append_completed(&completed_path, &key_str_clone, &file_lock_clone);
-                            }
-                            Err(e) => {
-                                tracing::error!("[{}] workflow FAILED: {}", event_key, e);
-                                // Prevent re-dispatch within this daemon run (in-memory only)
-                                permanently_failed_clone
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .insert(key_str_clone.clone());
-                                append_failed(
-                                    &failed_path,
-                                    &key_str_clone,
-                                    &e.to_string(),
-                                    &file_lock_clone,
-                                );
-                            }
-                        }
-                    });
-                    active_tasks.push(handle);
                 }
             }
         }
-
-        // Log idle state when no workflows are running and nothing was dispatched.
-        if is_idle(dispatched_this_tick, &in_flight) {
-            tracing::info!("Application is idle: no active workflows");
-        }
-
-        // Periodically clean up finished handles to avoid unbounded growth.
-        active_tasks.retain(|h| !h.is_finished());
     }
-
-    // Loop exited (shutdown requested) — wait for active workflows to drain.
-    active_tasks.retain(|h| !h.is_finished());
-    if !active_tasks.is_empty() {
-        tracing::info!(
-            "Waiting for {} active workflow(s) to complete…",
-            active_tasks.len()
-        );
-        for handle in active_tasks {
-            let _ = handle.await;
-        }
-    }
-    tracing::info!("All active workflows completed. Exiting.");
 
     Ok(())
 }
@@ -392,33 +272,11 @@ fn load_workflow_entries_if_changed(
     ReloadDecision::Unchanged
 }
 
-/// Append a key to completed.json (read-modify-write the JSON array).
-fn append_completed(path: &Path, key: &str, file_lock: &std::sync::Mutex<()>) {
-    let _guard = file_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut set: Vec<String> = read_json_array(path);
-    if !set.contains(&key.to_string()) {
-        set.push(key.to_string());
-    }
-    if let Err(e) = write_json(path, &set) {
-        tracing::error!("failed to persist completed.json: {}", e);
-    }
-}
-
-/// Append a failure entry to failed.json.
-fn append_failed(path: &Path, key: &str, error: &str, file_lock: &std::sync::Mutex<()>) {
-    let _guard = file_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut entries: Vec<FailedEntry> = match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => vec![],
-    };
-    entries.push(FailedEntry {
-        key: key.to_string(),
-        timestamp: Utc::now().to_rfc3339(),
-        error: error.to_string(),
-    });
-    if let Err(e) = write_json(path, &entries) {
-        tracing::error!("failed to persist failed.json: {}", e);
-    }
+/// Load previously completed event keys from the data directory.
+pub fn load_completed(data_root: &Path) -> Arc<Mutex<HashSet<String>>> {
+    let path = data_root.join("completed.json");
+    let set: HashSet<String> = read_json_array(&path).into_iter().collect();
+    Arc::new(Mutex::new(set))
 }
 
 fn read_json_array(path: &Path) -> Vec<String> {
@@ -426,35 +284,6 @@ fn read_json_array(path: &Path) -> Vec<String> {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => vec![],
     }
-}
-
-fn write_json<T: Serialize>(path: &Path, val: &T) -> Result<()> {
-    let s = serde_json::to_string_pretty(val)?;
-
-    // Write to a temp file in the same directory, then atomically rename.
-    // This prevents data corruption if the process crashes mid-write — the
-    // original file is either untouched or fully replaced.
-    let temp_path = path.with_extension("tmp");
-    std::fs::write(&temp_path, &s)?;
-    std::fs::rename(&temp_path, path)?;
-
-    Ok(())
-}
-
-pub fn load_completed(data_root: &Path) -> Arc<Mutex<HashSet<String>>> {
-    let path = data_root.join("completed.json");
-    let set: HashSet<String> = read_json_array(&path).into_iter().collect();
-    Arc::new(Mutex::new(set))
-}
-
-/// Returns true when no workflows were dispatched this tick and none are
-/// currently in flight — i.e., the application is idle.
-fn is_idle(dispatched_this_tick: usize, in_flight: &Arc<Mutex<HashSet<String>>>) -> bool {
-    dispatched_this_tick == 0
-        && in_flight
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_empty()
 }
 
 #[cfg(test)]
@@ -617,48 +446,5 @@ harness = { type = "hermes", profile = "cto" }
                 // Also acceptable — can't load entries from an empty dir.
             }
         }
-    }
-
-    #[test]
-    fn test_is_idle_when_nothing_dispatched_and_in_flight_empty() {
-        let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        assert!(is_idle(0, &in_flight));
-    }
-
-    #[test]
-    fn test_not_idle_when_dispatched_events() {
-        let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-        assert!(!is_idle(1, &in_flight));
-    }
-
-    #[test]
-    fn test_not_idle_when_in_flight_workflows() {
-        let in_flight: Arc<Mutex<HashSet<String>>> =
-            Arc::new(Mutex::new(HashSet::from(["owner/repo/42".to_string()])));
-        assert!(!is_idle(0, &in_flight));
-    }
-
-    #[test]
-    fn test_not_idle_when_both_dispatched_and_in_flight() {
-        let in_flight: Arc<Mutex<HashSet<String>>> =
-            Arc::new(Mutex::new(HashSet::from(["owner/repo/42".to_string()])));
-        assert!(!is_idle(1, &in_flight));
-    }
-
-    #[test]
-    fn test_write_json_atomic() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.json");
-        let data = vec!["test1".to_string(), "test2".to_string()];
-
-        write_json(&path, &data).unwrap();
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("\"test1\""));
-        assert!(content.contains("\"test2\""));
-
-        // Ensure no .tmp file is left behind
-        let tmp_path = path.with_extension("tmp");
-        assert!(!tmp_path.exists());
     }
 }
