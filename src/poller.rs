@@ -430,7 +430,14 @@ fn read_json_array(path: &Path) -> Vec<String> {
 
 fn write_json<T: Serialize>(path: &Path, val: &T) -> Result<()> {
     let s = serde_json::to_string_pretty(val)?;
-    std::fs::write(path, s)?;
+
+    // Write to a temp file in the same directory, then atomically rename.
+    // This prevents data corruption if the process crashes mid-write — the
+    // original file is either untouched or fully replaced.
+    let temp_path = path.with_extension("tmp");
+    std::fs::write(&temp_path, &s)?;
+    std::fs::rename(&temp_path, path)?;
+
     Ok(())
 }
 
@@ -636,5 +643,22 @@ harness = { type = "hermes", profile = "cto" }
         let in_flight: Arc<Mutex<HashSet<String>>> =
             Arc::new(Mutex::new(HashSet::from(["owner/repo/42".to_string()])));
         assert!(!is_idle(1, &in_flight));
+    }
+
+    #[test]
+    fn test_write_json_atomic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.json");
+        let data = vec!["test1".to_string(), "test2".to_string()];
+
+        write_json(&path, &data).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("\"test1\""));
+        assert!(content.contains("\"test2\""));
+
+        // Ensure no .tmp file is left behind
+        let tmp_path = path.with_extension("tmp");
+        assert!(!tmp_path.exists());
     }
 }
