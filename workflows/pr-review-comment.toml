@@ -25,13 +25,15 @@ name = "Address Review"
 prompt_template = """
 A review has been made on PR #{{pr_number}} in {{owner}}/{{repo}} that you need to respond to.
 
-First you should evaluate the review. DO NOT assume it to be correct, validate any claims it makes.
+First you should emoji react with eyes to indicate you have seen the review.
+
+Next you should evaluate the review. DO NOT assume it to be correct, validate any claims it makes.
 
 You must respond by either:
 1) Implementing and pushing changes to address the review, and responding with a comment
 2) Respond with a comment rebutting the review, or requesting additional feedback or context.
 
-If the review has multiple parts you may do a combination of 1 and 2 if needed.
+If the review has multiple parts you may do a combination of 1 and 2 as needed.
 
 If you push any changes, please ensure the PR description is updated accordingly.
 """
