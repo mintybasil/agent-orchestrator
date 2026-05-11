@@ -299,10 +299,8 @@ impl Trigger for GithubPrReviewTrigger {
                             if seen_reviews.insert(review.id) {
                                 let mut vars = std::collections::HashMap::new();
                                 vars.insert("pr_number".to_string(), review.pr_number.to_string());
-                                let workspace_id = format!(
-                                    "{}_review-{}",
-                                    review.pr_number, review.id
-                                );
+                                let workspace_id =
+                                    format!("{}_review-{}", review.pr_number, review.id);
                                 events.push(TriggerEvent {
                                     owner: repo_cfg.owner.clone(),
                                     repo: repo_cfg.repo.clone(),
@@ -355,7 +353,10 @@ impl Trigger for LocalFileTrigger {
             let dir = std::path::Path::new(&directory);
 
             if !dir.is_dir() {
-                tracing::warn!("local_file trigger: directory does not exist: {}", directory);
+                tracing::warn!(
+                    "local_file trigger: directory does not exist: {}",
+                    directory
+                );
                 return Ok(events);
             }
 
@@ -561,9 +562,10 @@ pattern = "*.md"
             label: "cron:nightly-build".to_string(),
             workspace_id: "nightly-build".to_string(),
             number: 0,
-            variables: std::collections::HashMap::from([
-                ("schedule".to_string(), "0 0 * * *".to_string()),
-            ]),
+            variables: std::collections::HashMap::from([(
+                "schedule".to_string(),
+                "0 0 * * *".to_string(),
+            )]),
         };
         assert_eq!(event.number, 0);
         assert_eq!(event.workspace_id, "nightly-build");
@@ -585,14 +587,16 @@ pattern = "*.md"
             ]),
         };
         assert_eq!(event.number, 0);
-        assert_eq!(event.variables.get("file_name"), Some(&"todo.md".to_string()));
+        assert_eq!(
+            event.variables.get("file_name"),
+            Some(&"todo.md".to_string())
+        );
     }
 
     #[test]
     fn trigger_event_to_event_key_maps_fields() {
-        let vars = std::collections::HashMap::from([
-            ("issue_number".to_string(), "42".to_string()),
-        ]);
+        let vars =
+            std::collections::HashMap::from([("issue_number".to_string(), "42".to_string())]);
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),
@@ -668,7 +672,10 @@ typo_field = "oops"
         assert_eq!(events[0].workspace_id, "task1");
         assert_eq!(events[0].number, 0);
         assert_eq!(events[0].owner, "local");
-        assert_eq!(events[0].variables.get("file_name"), Some(&"task1.md".to_string()));
+        assert_eq!(
+            events[0].variables.get("file_name"),
+            Some(&"task1.md".to_string())
+        );
     }
 
     #[test]
