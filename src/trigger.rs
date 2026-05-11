@@ -25,7 +25,7 @@ pub struct TriggerEvent {
 
 /// Config-side trigger definition deserialized from TOML.
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TriggerConfig {
     /// Poll GitHub for issues assigned to a specific user.
     GithubIssueAssigned {
@@ -315,5 +315,26 @@ allowed_users = ["alice", "bob"]
         assert_eq!(event.variables.get("issue_number"), None);
         assert_eq!(event.key, "99/1234567");
         assert_eq!(event.label, "acme/project#99_review-1234567");
+    }
+
+    #[test]
+    fn trigger_config_rejects_unknown_fields() {
+        let toml = r#"
+type = "github_issue_assigned"
+assigned_to = "alice"
+allowed_users = ["bob"]
+typo_field = "oops"
+"#;
+        let result = toml::from_str::<TriggerConfig>(toml);
+        assert!(
+            result.is_err(),
+            "expected unknown field to be rejected, got: {:?}",
+            result
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown field"),
+            "error should mention 'unknown field', got: {err}"
+        );
     }
 }

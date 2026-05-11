@@ -5,6 +5,7 @@ use crate::workflow::Step;
 ///
 /// Controls how the orchestrator manages the repository clone and worktrees.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitConfig {
     /// Branch that worktrees are based on and the repo is checked out on.
     /// Defaults to "main" if not specified.
@@ -41,6 +42,7 @@ impl Default for GitConfig {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Trigger configuration — what initiates workflow runs.
     /// Empty vec is allowed at deserialization but rejected by Config::load.
@@ -59,6 +61,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepoConfig {
     pub owner: String,
     pub repo: String,
@@ -462,6 +465,100 @@ harness = { type = "hermes", profile = "cto" }
         assert!(
             msg.contains("not a directory"),
             "expected 'not a directory' in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn config_rejects_unknown_fields() {
+        use std::io::Write;
+        let toml = r#"
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+
+typo_field = "oops"
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field"),
+            "expected 'unknown field' in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn git_config_rejects_unknown_fields() {
+        use std::io::Write;
+        let toml = r#"
+
+[git]
+default_branch = "main"
+typo = true
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field"),
+            "expected 'unknown field' in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn repo_config_rejects_unknown_fields() {
+        use std::io::Write;
+        let toml = r#"
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "carol"
+allowed_users = ["dave"]
+
+[[repos]]
+owner = "o"
+repo = "r"
+typo = "oops"
+
+[[steps]]
+name = "test"
+prompt_template = "do thing"
+harness = { type = "hermes", profile = "cto" }
+"#;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(toml.as_bytes()).unwrap();
+        let err = Config::load(f.path()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field"),
+            "expected 'unknown field' in error, got: {msg}"
         );
     }
 }
