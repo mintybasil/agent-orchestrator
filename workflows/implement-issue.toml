@@ -40,7 +40,11 @@ We have a plan in {{output_path}}/plan.md to address issue #{{issue_number}} in 
 
 Push your changes to a new branch (zeroklaw/<branch-name>) and open a draft PR. Make sure to include "Closes #{{issue_number}}" somewhere in the PR description.
 
-Once the PR is open, check that the CI passes. If it fails, fix it. Once CI passes, convert it from a draft to a ready for review PR.
+Before making any commit make sure to run linters and tests locally.
+
+Once the PR is open, check that the CI passes. If there are any CI failures or merge conflicts, fix them.
+
+Once CI passes, do a final review to ensure all documentation (README.md, AGENTS.md, etc) have been updated. Then convert the PR from a draft to a ready for review PR, and request a review from @mintybasil.
 """
-harness = { type = "hermes", profile = "swe", worktree = true }
+harness = { type = "hermes", profile = "swe" }
 
