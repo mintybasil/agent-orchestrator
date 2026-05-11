@@ -403,10 +403,7 @@ mod tests {
             .join(&key.owner)
             .join(&key.repo)
             .join(&key.workspace_id);
-        assert_eq!(
-            workspace_dir,
-            PathBuf::from("/tmp/data/acme/project/42")
-        );
+        assert_eq!(workspace_dir, PathBuf::from("/tmp/data/acme/project/42"));
     }
 
     #[test]
