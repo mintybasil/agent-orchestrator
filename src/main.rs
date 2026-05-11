@@ -16,6 +16,7 @@ impl FormatTime for ShortTime {
 
 mod askpass;
 mod config;
+mod dispatcher;
 mod git;
 mod github;
 mod harness;
@@ -131,6 +132,22 @@ async fn main() {
 
     let completed = poller::load_completed(&data_root);
 
+    // Create the dispatcher and channel for event dispatch.
+    let (tx, rx) = tokio::sync::mpsc::channel::<dispatcher::DispatchMessage>(100);
+    let dispatcher = dispatcher::Dispatcher::new(
+        data_root.clone(),
+        token.clone(),
+        current_exe.clone(),
+        cli.show_logs,
+        cli.limit,
+        completed.clone(),
+    );
+
+    // Spawn the dispatcher task to consume events from the channel.
+    tokio::spawn(async move {
+        dispatcher.run(rx).await;
+    });
+
     // Shutdown signal: first Ctrl+C / SIGTERM → graceful shutdown (stop
     // dispatching, drain active workflows); second signal → immediate exit.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -172,11 +189,8 @@ async fn main() {
     if let Err(e) = poller::run_poll_loop(
         &cli.workflows,
         token,
-        &data_root,
         completed,
-        &current_exe,
-        cli.show_logs,
-        cli.limit,
+        tx,
         cli.interval,
         shutdown_rx,
     )
