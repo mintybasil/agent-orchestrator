@@ -79,7 +79,7 @@ impl Dispatcher {
         while let Some(msg) = rx.recv().await {
             let key_str = format!(
                 "{}/{}/{}",
-                msg.event_key.owner, msg.event_key.repo, msg.event_key.number
+                msg.event_key.owner, msg.event_key.repo, msg.event_key.workspace_id
             );
 
             // Skip if completed

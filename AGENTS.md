@@ -149,14 +149,18 @@ Each monitored repo gets a directory under the data dir:
 {data-dir}/
   {owner}/{repo}/
     repo/                -- git clone of the repo (auto-managed, when git.clone = true)
-    {issue_number}/      -- per-issue output directory
-      worktree-{N}/        -- per-issue git worktree (when git.worktree = true)
+    {workspace_id}/      -- per-event output directory
+      worktree-{N}/        -- per-event git worktree (when git.worktree = true)
       step_NN_<name>.log   -- full harness stdout+stderr log
       step_NN_<name>.error -- stderr on failure only
       step_NN_<name>.prompt -- rendered prompt text (after template substitution)
-  completed.json         -- set of completed issue keys
-  failed.json            -- list of failed issue entries
+  completed.json         -- set of completed event keys
+  failed.json            -- list of failed event entries
 ```
+
+For issues, `workspace_id` is the issue number (e.g. `42`).
+For PR reviews, `workspace_id` includes the review ID to ensure each review
+event gets its own discrete directory (e.g. `99_review-1234567`).
 
 Before each workflow run, the orchestrator ensures the repo exists:
 - **First run**: `git clone` into the `repo/` directory using `GIT_ASKPASS` for authentication
