@@ -95,11 +95,11 @@ pub async fn run_poll_loop(
                     // Build dedup key from owner/repo/event_key
                     let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
 
-                    // Parse the directory number from the event key.
+                    // Parse the number from the event key for logic that needs it.
                     // For issues the key is a plain number (e.g. "42").
                     // For PR reviews the key is composite (e.g. "99/1234567"),
                     // so we extract the PR number from variables instead.
-                    let dir_number: u64 = match event.key.parse() {
+                    let number: u64 = match event.key.parse() {
                         Ok(n) => n,
                         Err(_) => event
                             .variables
@@ -113,14 +113,31 @@ pub async fn run_poll_loop(
                                 0
                             }),
                     };
-                    if dir_number == 0 {
+                    if number == 0 {
                         continue;
                     }
+
+                    // Build a workspace_id that uniquely identifies the data directory.
+                    // For issues: just the number (e.g. "42").
+                    // For PR reviews: extract the review-specific part from the label,
+                    // e.g. "acme/project#99_review-1234567" → "99_review-1234567".
+                    let workspace_id = if event.key.contains('/') {
+                        // PR review: extract the part after the '#' in the label.
+                        // Label format: "owner/repo#PR_review-REVIEW_ID"
+                        event.label.rsplit_once('#').map_or_else(
+                            || event.key.replace('/', "_"),
+                            |(_, suffix)| suffix.to_string(),
+                        )
+                    } else {
+                        // Issue: workspace_id is just the number string.
+                        number.to_string()
+                    };
 
                     let event_key = EventKey {
                         owner: event.owner.clone(),
                         repo: event.repo.clone(),
-                        number: dir_number,
+                        number,
+                        workspace_id,
                         label: event.label.clone(),
                         variables: event.variables.clone(),
                     };

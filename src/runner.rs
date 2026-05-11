@@ -16,8 +16,12 @@ pub struct EventKey {
     pub owner: String,
     pub repo: String,
     /// Opaque numeric identifier (issue number or PR number).
-    /// Used for data directory paths — not for display.
+    /// Used for logic that specifically needs the issue/PR number.
     pub number: u64,
+    /// Unique workspace identifier for data directory paths.
+    /// For issues this is just the number (e.g. "42"),
+    /// for PR reviews this includes the review ID (e.g. "99_review-1234567").
+    pub workspace_id: String,
     /// Human-readable label for logging (e.g. "acme/project#42" for issues,
     /// "acme/project#99_review-1234567" for PR reviews).
     pub label: String,
@@ -83,7 +87,7 @@ pub async fn run_workflow(
     let workspace_dir = data_root
         .join(&key.owner)
         .join(&key.repo)
-        .join(key.number.to_string());
+        .join(&key.workspace_id);
     fs::create_dir_all(&workspace_dir)?;
 
     // Determine the repo path and optionally create a worktree.
@@ -367,7 +371,6 @@ mod tests {
 
     #[test]
     fn render_with_template_vars_matches_prompt_file() {
-        // End-to-end: render a template and verify it round-trips through fs::write.
         let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("owner".to_string(), "acme".to_string());
         vars.insert("repo".to_string(), "project".to_string());
@@ -382,5 +385,61 @@ mod tests {
 
         let read_back = fs::read_to_string(&prompt_path).unwrap();
         assert_eq!(read_back, "Triage acme/project#42");
+    }
+
+    #[test]
+    fn workspace_dir_uses_workspace_id_for_issues() {
+        // For issues, workspace_id is just the number string.
+        let key = EventKey {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            number: 42,
+            workspace_id: "42".to_string(),
+            label: "acme/project#42".to_string(),
+            variables: HashMap::new(),
+        };
+        let data_root = PathBuf::from("/tmp/data");
+        let workspace_dir = data_root
+            .join(&key.owner)
+            .join(&key.repo)
+            .join(&key.workspace_id);
+        assert_eq!(workspace_dir, PathBuf::from("/tmp/data/acme/project/42"));
+    }
+
+    #[test]
+    fn workspace_dir_uses_workspace_id_for_pr_reviews() {
+        // For PR reviews, workspace_id includes the review ID for uniqueness.
+        let key = EventKey {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            number: 99,
+            workspace_id: "99_review-1234567".to_string(),
+            label: "acme/project#99_review-1234567".to_string(),
+            variables: HashMap::from([("pr_number".to_string(), "99".to_string())]),
+        };
+        let data_root = PathBuf::from("/tmp/data");
+        let workspace_dir = data_root
+            .join(&key.owner)
+            .join(&key.repo)
+            .join(&key.workspace_id);
+        // Each PR review gets its own discrete directory.
+        assert_eq!(
+            workspace_dir,
+            PathBuf::from("/tmp/data/acme/project/99_review-1234567")
+        );
+        // Verify that two reviews on the same PR don't share a directory.
+        let key2 = EventKey {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            number: 99,
+            workspace_id: "99_review-7654321".to_string(),
+            label: "acme/project#99_review-7654321".to_string(),
+            variables: HashMap::from([("pr_number".to_string(), "99".to_string())]),
+        };
+        let workspace_dir2 = data_root
+            .join(&key2.owner)
+            .join(&key2.repo)
+            .join(&key2.workspace_id);
+        assert_ne!(workspace_dir, workspace_dir2);
     }
 }
