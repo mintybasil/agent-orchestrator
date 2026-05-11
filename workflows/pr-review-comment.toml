@@ -1,5 +1,3 @@
-poll_interval_secs = 60
-
 repos = [
     {owner = "zerokrab", repo = "bento-hancho"},
     {owner = "zerokrab", repo = "bento-bench"},
