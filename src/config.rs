@@ -243,6 +243,9 @@ harness = { type = "hermes", profile = "cto" }
             TriggerConfig::GithubPrReview { .. } => {
                 panic!("expected GithubIssueAssigned, got GithubPrReview");
             }
+            TriggerConfig::LocalFile { .. } => {
+                panic!("expected GithubIssueAssigned, got LocalFile");
+            }
         }
         // Verify step harness loaded
         match &config.steps[0].harness {

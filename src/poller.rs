@@ -7,7 +7,6 @@ use tokio::time::{Duration, interval};
 
 use crate::config::Config;
 use crate::dispatcher::DispatchMessage;
-use crate::runner::EventKey;
 use crate::trigger::Trigger;
 use crate::workflow;
 
@@ -26,7 +25,7 @@ pub async fn run_poll_loop(
     // Track workflow file timestamps so we only reload when something changes.
     // Initial load — failure is fatal because the daemon can't run without
     // any valid workflows.
-    let (mut workflow_entries, mut last_file_state) = load_workflow_entries(workflows_dir)
+    let (mut workflow_entries, mut last_file_state) = load_workflow_entries(workflows_dir, &token)
         .map_err(|e| {
             tracing::error!(
                 "failed to load workflow configs from {}: {}",
@@ -56,7 +55,7 @@ pub async fn run_poll_loop(
         }
 
         // Hot-reload: check if workflow files changed since last tick.
-        match load_workflow_entries_if_changed(workflows_dir, &last_file_state) {
+        match load_workflow_entries_if_changed(workflows_dir, &last_file_state, &token) {
             ReloadDecision::Reload((new_entries, new_file_state)) => {
                 tracing::info!(
                     "workflow configs changed — reloading {} workflow(s)",
@@ -83,7 +82,7 @@ pub async fn run_poll_loop(
                     entry.repos.len()
                 );
 
-                let events = match trigger.poll(&entry.repos, &token).await {
+                let events = match trigger.poll(&entry.repos).await {
                     Ok(events) => events,
                     Err(e) => {
                         tracing::error!("trigger {} poll failed: {}", trigger.name(), e);
@@ -95,52 +94,14 @@ pub async fn run_poll_loop(
                     // Build dedup key from owner/repo/event_key
                     let key_str = format!("{}/{}/{}", event.owner, event.repo, event.key);
 
-                    // Parse the number from the event key for logic that needs it.
-                    // For issues the key is a plain number (e.g. "42").
-                    // For PR reviews the key is composite (e.g. "99/1234567"),
-                    // so we extract the PR number from variables instead.
-                    let number: u64 = match event.key.parse() {
-                        Ok(n) => n,
-                        Err(_) => event
-                            .variables
-                            .get("pr_number")
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or_else(|| {
-                                tracing::warn!(
-                                    "trigger event key is not a number and no pr_number variable: {}",
-                                    event.key
-                                );
-                                0
-                            }),
-                    };
-                    if number == 0 {
-                        continue;
-                    }
+                    // Convert to EventKey using the trigger's own workspace_id
+                    // and number fields — no GitHub-specific parsing here.
+                    let event_key = event.to_event_key();
 
-                    // Build a workspace_id that uniquely identifies the data directory.
-                    // For issues: just the number (e.g. "42").
-                    // For PR reviews: extract the review-specific part from the label,
-                    // e.g. "acme/project#99_review-1234567" → "99_review-1234567".
-                    let workspace_id = if event.key.contains('/') {
-                        // PR review: extract the part after the '#' in the label.
-                        // Label format: "owner/repo#PR_review-REVIEW_ID"
-                        event.label.rsplit_once('#').map_or_else(
-                            || event.key.replace('/', "_"),
-                            |(_, suffix)| suffix.to_string(),
-                        )
-                    } else {
-                        // Issue: workspace_id is just the number string.
-                        number.to_string()
-                    };
-
-                    let event_key = EventKey {
-                        owner: event.owner.clone(),
-                        repo: event.repo.clone(),
-                        number,
-                        workspace_id,
-                        label: event.label.clone(),
-                        variables: event.variables.clone(),
-                    };
+                    // Skip events with number=0 from non-GitHub triggers
+                    // (like local_file/cron) if you need a numeric ID for
+                    // worktree naming. Currently we allow number=0 and handle
+                    // it downstream.
 
                     // Skip if completed
                     if completed
@@ -195,6 +156,7 @@ enum ReloadDecision {
 /// used to detect changes for hot-reloading.
 fn load_workflow_entries(
     workflows_dir: &Path,
+    token: &str,
 ) -> Result<(Vec<WorkflowEntry>, HashMap<PathBuf, SystemTime>)> {
     let configs = Config::load_all(workflows_dir)?;
 
@@ -214,7 +176,7 @@ fn load_workflow_entries(
         .into_iter()
         .map(|config| {
             let triggers: Vec<Box<dyn Trigger + Send>> =
-                config.triggers.iter().map(|tc| tc.build()).collect();
+                config.triggers.iter().map(|tc| tc.build(token)).collect();
             let steps = Arc::new(config.steps.clone());
             let repos = config.repos.clone();
             let git_config = config.git.clone();
@@ -240,6 +202,7 @@ fn load_workflow_entries(
 fn load_workflow_entries_if_changed(
     workflows_dir: &Path,
     last_file_state: &HashMap<PathBuf, SystemTime>,
+    token: &str,
 ) -> ReloadDecision {
     // Scan current files and their mtimes.
     let mut current_state: HashMap<PathBuf, SystemTime> = HashMap::new();
@@ -267,7 +230,7 @@ fn load_workflow_entries_if_changed(
     // Compare current state against last known state.
     if current_state.len() != last_file_state.len() {
         // File count changed (added or removed a .toml file).
-        return match load_workflow_entries(workflows_dir) {
+        return match load_workflow_entries(workflows_dir, token) {
             Ok((entries, state)) => ReloadDecision::Reload((entries, state)),
             Err(e) => ReloadDecision::Error(e),
         };
@@ -278,7 +241,7 @@ fn load_workflow_entries_if_changed(
             Some(last_mtime) if last_mtime == mtime => {}
             _ => {
                 // New file or modified file detected.
-                return match load_workflow_entries(workflows_dir) {
+                return match load_workflow_entries(workflows_dir, token) {
                     Ok((entries, state)) => ReloadDecision::Reload((entries, state)),
                     Err(e) => ReloadDecision::Error(e),
                 };
@@ -330,7 +293,7 @@ harness = { type = "hermes", profile = "cto" }
     fn load_workflow_entries_succeeds_with_valid_dir() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("workflow.toml"), valid_toml()).unwrap();
-        let (entries, file_state) = load_workflow_entries(dir.path()).unwrap();
+        let (entries, file_state) = load_workflow_entries(dir.path(), "fake-token").unwrap();
         assert_eq!(entries.len(), 1, "expected 1 workflow entry");
         assert_eq!(file_state.len(), 1, "expected 1 file in state map");
         // The entry should have 1 trigger, 1 repo, and 1 step
@@ -341,7 +304,7 @@ harness = { type = "hermes", profile = "cto" }
     #[test]
     fn load_workflow_entries_fails_with_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let result = load_workflow_entries(dir.path());
+        let result = load_workflow_entries(dir.path(), "fake-token");
         assert!(result.is_err(), "expected error for empty dir");
     }
 
@@ -352,7 +315,7 @@ harness = { type = "hermes", profile = "cto" }
         std::fs::write(dir.path().join("beta.toml"), valid_toml()).unwrap();
         // Non-toml file should be ignored in file state
         std::fs::write(dir.path().join("readme.md"), "ignore me").unwrap();
-        let (entries, file_state) = load_workflow_entries(dir.path()).unwrap();
+        let (entries, file_state) = load_workflow_entries(dir.path(), "fake-token").unwrap();
         assert_eq!(entries.len(), 2, "expected 2 workflow entries");
         assert_eq!(file_state.len(), 2, "expected 2 files in state map");
     }
@@ -361,10 +324,10 @@ harness = { type = "hermes", profile = "cto" }
     fn reload_decision_unchanged_when_no_changes() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("workflow.toml"), valid_toml()).unwrap();
-        let (_, file_state) = load_workflow_entries(dir.path()).unwrap();
+        let (_, file_state) = load_workflow_entries(dir.path(), "fake-token").unwrap();
 
         // Check again without any changes — should be Unchanged.
-        match load_workflow_entries_if_changed(dir.path(), &file_state) {
+        match load_workflow_entries_if_changed(dir.path(), &file_state, "fake-token") {
             ReloadDecision::Unchanged => {}
             ReloadDecision::Reload(_) => panic!("expected Unchanged, got Reload"),
             ReloadDecision::Error(e) => panic!("expected Unchanged, got Error: {e}"),
@@ -375,12 +338,12 @@ harness = { type = "hermes", profile = "cto" }
     fn reload_decision_detects_new_file() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("alpha.toml"), valid_toml()).unwrap();
-        let (_, file_state) = load_workflow_entries(dir.path()).unwrap();
+        let (_, file_state) = load_workflow_entries(dir.path(), "fake-token").unwrap();
 
         // Add a new .toml file.
         std::fs::write(dir.path().join("beta.toml"), valid_toml()).unwrap();
 
-        match load_workflow_entries_if_changed(dir.path(), &file_state) {
+        match load_workflow_entries_if_changed(dir.path(), &file_state, "fake-token") {
             ReloadDecision::Reload((entries, new_state)) => {
                 assert_eq!(entries.len(), 2, "expected 2 entries after adding a file");
                 assert_eq!(new_state.len(), 2, "expected 2 files in new state");
@@ -397,12 +360,12 @@ harness = { type = "hermes", profile = "cto" }
         let beta = dir.path().join("beta.toml");
         std::fs::write(&alpha, valid_toml()).unwrap();
         std::fs::write(&beta, valid_toml()).unwrap();
-        let (_, file_state) = load_workflow_entries(dir.path()).unwrap();
+        let (_, file_state) = load_workflow_entries(dir.path(), "fake-token").unwrap();
 
         // Remove one .toml file.
         std::fs::remove_file(&beta).unwrap();
 
-        match load_workflow_entries_if_changed(dir.path(), &file_state) {
+        match load_workflow_entries_if_changed(dir.path(), &file_state, "fake-token") {
             ReloadDecision::Reload((entries, new_state)) => {
                 assert_eq!(entries.len(), 1, "expected 1 entry after removing a file");
                 assert_eq!(new_state.len(), 1, "expected 1 file in new state");
@@ -417,7 +380,7 @@ harness = { type = "hermes", profile = "cto" }
         let dir = tempfile::tempdir().unwrap();
         let toml_path = dir.path().join("workflow.toml");
         std::fs::write(&toml_path, valid_toml()).unwrap();
-        let (_, file_state) = load_workflow_entries(dir.path()).unwrap();
+        let (_, file_state) = load_workflow_entries(dir.path(), "fake-token").unwrap();
 
         // Modify the file content (change the assigned_to user).
         let modified_toml = valid_toml().replace("testuser", "newuser");
@@ -425,7 +388,7 @@ harness = { type = "hermes", profile = "cto" }
         std::fs::remove_file(&toml_path).unwrap();
         std::fs::write(&toml_path, modified_toml).unwrap();
 
-        match load_workflow_entries_if_changed(dir.path(), &file_state) {
+        match load_workflow_entries_if_changed(dir.path(), &file_state, "fake-token") {
             ReloadDecision::Reload((entries, _new_state)) => {
                 // The reloaded config should reflect the change.
                 assert_eq!(entries.len(), 1, "expected 1 entry after modifying a file");
@@ -443,7 +406,7 @@ harness = { type = "hermes", profile = "cto" }
     fn reload_decision_error_on_invalid_dir() {
         let dir = tempfile::tempdir().unwrap();
         // Empty dir means no .toml files — load_workflow_entries will fail.
-        let result = load_workflow_entries(dir.path());
+        let result = load_workflow_entries(dir.path(), "fake-token");
         assert!(result.is_err(), "expected error for empty dir");
 
         // load_workflow_entries_if_changed should also return Error
@@ -452,7 +415,7 @@ harness = { type = "hermes", profile = "cto" }
         // An empty directory has 0 .toml files, same count as empty_state (0).
         // But all files in empty_state must match — with 0 files, this is vacuously true.
         // So it should return Unchanged (no reload needed since there's nothing to manage).
-        match load_workflow_entries_if_changed(dir.path(), &empty_state) {
+        match load_workflow_entries_if_changed(dir.path(), &empty_state, "fake-token") {
             ReloadDecision::Unchanged => {
                 // Both are 0 .toml files — no change detected, which is correct.
             }
