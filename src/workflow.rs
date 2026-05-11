@@ -9,6 +9,7 @@ use crate::harness::HarnessConfig;
 /// (e.g. hermes profile, worktree, provider, model) live inside the
 /// `harness` field.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Step {
     pub name: String,
     pub prompt_template: String,
@@ -167,5 +168,22 @@ repo = "r"
     #[test]
     fn missing_file_errors() {
         assert!(Config::load(std::path::Path::new("/nonexistent/config.toml")).is_err());
+    }
+
+    #[test]
+    fn step_rejects_unknown_fields() {
+        let steps = r#"
+[[steps]]
+name = "triage"
+prompt_template = "Do triage."
+harness = { type = "hermes", profile = "test" }
+typo_field = "oops"
+"#;
+        let err = parse_config(steps).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("unknown field"),
+            "expected 'unknown field' in error, got: {msg}"
+        );
     }
 }

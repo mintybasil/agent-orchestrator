@@ -17,7 +17,7 @@ use std::process::{Command, Stdio};
 /// `{ type = "file_not_empty", path = "..." }` or
 /// `{ type = "script", command = "...", args = ["..."] }`.
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Hook {
     /// Assert that the file at `path` exists and contains at least one byte.
     /// `path` may contain template placeholders (e.g. `"{{output_path}}"`).
@@ -256,6 +256,26 @@ type = "push_code"
                 Path::new("/fake/exe")
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn hook_rejects_unknown_fields() {
+        let toml = r#"
+type = "file_not_empty"
+path = "{{output_path}}"
+typo = "oops"
+"#;
+        let result = toml::from_str::<Hook>(toml);
+        assert!(
+            result.is_err(),
+            "expected unknown field to be rejected, got: {:?}",
+            result
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown field"),
+            "error should mention 'unknown field', got: {err}"
         );
     }
 }
