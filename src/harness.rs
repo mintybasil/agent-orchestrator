@@ -42,6 +42,9 @@ pub enum HarnessConfig {
         /// Optional model passed to hermes via `--model <model>`.
         #[serde(default)]
         model: Option<String>,
+        /// Optional max turns passed to hermes via `--max-turns <n>`.
+        #[serde(default)]
+        max_turns: Option<u32>,
     },
     // Future variants:
     // Cursor { binary: String, prompt: String },
@@ -79,10 +82,12 @@ impl HarnessConfig {
                 profile,
                 provider,
                 model,
+                max_turns,
             } => Box::new(crate::hermes::HermesHarness {
                 profile: profile.clone(),
                 provider: provider.clone(),
                 model: model.clone(),
+                max_turns: *max_turns,
             }),
         }
     }
@@ -99,6 +104,7 @@ type = "hermes"
 profile = "cto"
 provider = "openai"
 model = "o3"
+max_turns = 10
 "#;
         let config: HarnessConfig = toml::from_str(toml).unwrap();
         match config {
@@ -106,10 +112,12 @@ model = "o3"
                 profile,
                 provider,
                 model,
+                max_turns,
             } => {
                 assert_eq!(profile, "cto");
                 assert_eq!(provider, Some("openai".to_string()));
                 assert_eq!(model, Some("o3".to_string()));
+                assert_eq!(max_turns, Some(10));
             }
         }
     }
@@ -126,10 +134,12 @@ profile = "cto"
                 profile,
                 provider,
                 model,
+                max_turns,
             } => {
                 assert_eq!(profile, "cto");
                 assert!(provider.is_none());
                 assert!(model.is_none());
+                assert!(max_turns.is_none());
             }
         }
     }
@@ -140,6 +150,7 @@ profile = "cto"
             profile: "cto".to_string(),
             provider: None,
             model: None,
+            max_turns: None,
         };
         let harness = config.build();
         assert_eq!(harness.name(), "hermes");

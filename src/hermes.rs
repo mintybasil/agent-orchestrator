@@ -24,6 +24,7 @@ pub struct InvokeArgs {
     pub profile: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub max_turns: Option<u32>,
     pub error_file: PathBuf,
     pub log_file: PathBuf,
     pub show_logs: bool,
@@ -64,6 +65,9 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
     }
     if let Some(model) = &args.model {
         cmd.arg("--model").arg(model);
+    }
+    if let Some(max_turns) = args.max_turns {
+        cmd.arg("--max-turns").arg(max_turns.to_string());
     }
     let mut child = cmd
         .stdout(Stdio::piped())
@@ -262,6 +266,7 @@ pub struct HermesHarness {
     pub profile: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub max_turns: Option<u32>,
 }
 
 impl Harness for HermesHarness {
@@ -283,6 +288,7 @@ impl Harness for HermesHarness {
             profile: self.profile.clone(),
             provider: self.provider.clone(),
             model: self.model.clone(),
+            max_turns: self.max_turns,
             error_file: error_path.to_path_buf(),
             log_file: log_config.log_path.clone(),
             show_logs: log_config.show_logs,

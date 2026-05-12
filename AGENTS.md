@@ -125,7 +125,7 @@ Harnesses define **which agent backend runs a step**. They implement the
 
 Each `HarnessConfig` variant carries **harness-specific options** — the Step
 struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
-`profile`, `provider`, and `model` because those are hermes CLI flags, not
+`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI flags, not
 generic step concerns.
 
 **Note**: Worktree management is handled by the orchestrator (via `[git]`
@@ -256,6 +256,7 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 | `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
 | `--model <name>` | `model` field in HarnessConfig::Hermes | optional |
+| `--max-turns <n>` | `max_turns` field in HarnessConfig::Hermes | optional |
 
 The working directory for the harness invocation depends on `[git]` config:
 - **worktree = true**: invoked from the per-issue worktree directory
@@ -312,7 +313,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3" }
+# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3", max_turns = 10 }
 
 # Optional pre-hooks (run before the agent harness)
 [[steps.pre_hooks]]
