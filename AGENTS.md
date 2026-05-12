@@ -382,7 +382,7 @@ runtime. Available variables depend on the trigger type:
 | Trigger | Extra placeholders |
 |---|---|
 | `github_issue_assigned` | `{{issue_number}}` |
-| `github_pr_review` | `{{pr_number}}` |
+| `github_pr_review` | `{{pr_number}}`, `{{review_id}}` |
 | `local_file` | `{{file_name}}`, `{{file_path}}` |
 
 ### Hook types

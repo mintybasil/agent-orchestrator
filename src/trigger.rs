@@ -67,7 +67,7 @@ pub struct TriggerEvent {
     /// 0 when not applicable (e.g. cron or local file triggers).
     pub number: u64,
     /// Trigger-specific template variables (e.g. "issue_number" for issues,
-    /// "pr_number" for PR reviews). These are merged with global variables
+    /// "pr_number" and "review_id" for PR reviews). These are merged with global variables
     /// (owner, repo, output_path, workspace) in the runner.
     pub variables: std::collections::HashMap<String, String>,
 }
@@ -289,6 +289,7 @@ impl Trigger for GithubPrReviewTrigger {
                             if seen_reviews.insert(review.id) {
                                 let mut vars = std::collections::HashMap::new();
                                 vars.insert("pr_number".to_string(), review.pr_number.to_string());
+                                vars.insert("review_id".to_string(), review.id.to_string());
                                 let workspace_id =
                                     format!("{}_review-{}", review.pr_number, review.id);
                                 events.push(TriggerEvent {
@@ -524,7 +525,10 @@ pattern = "*.md"
 
     #[test]
     fn trigger_event_pr_carries_pr_number_variable() {
-        let vars = std::collections::HashMap::from([("pr_number".to_string(), "99".to_string())]);
+        let vars = std::collections::HashMap::from([
+            ("pr_number".to_string(), "99".to_string()),
+            ("review_id".to_string(), "1234567".to_string()),
+        ]);
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),
@@ -535,6 +539,7 @@ pattern = "*.md"
             variables: vars,
         };
         assert_eq!(event.variables.get("pr_number"), Some(&"99".to_string()));
+        assert_eq!(event.variables.get("review_id"), Some(&"1234567".to_string()));
         assert_eq!(event.variables.get("issue_number"), None);
         assert_eq!(event.key, "99/1234567");
         assert_eq!(event.label, "acme/project#99_review-1234567");
@@ -607,7 +612,10 @@ pattern = "*.md"
 
     #[test]
     fn trigger_event_to_event_key_for_pr_review() {
-        let vars = std::collections::HashMap::from([("pr_number".to_string(), "99".to_string())]);
+        let vars = std::collections::HashMap::from([
+            ("pr_number".to_string(), "99".to_string()),
+            ("review_id".to_string(), "1234567".to_string()),
+        ]);
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),
@@ -620,6 +628,7 @@ pattern = "*.md"
         let ek = event.to_event_key();
         assert_eq!(ek.number, 99);
         assert_eq!(ek.workspace_id, "99_review-1234567");
+        assert_eq!(ek.variables.get("review_id"), Some(&"1234567".to_string()));
     }
 
     #[test]
