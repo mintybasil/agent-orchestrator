@@ -271,12 +271,7 @@ impl Trigger for GithubPrReviewTrigger {
             let mut events = Vec::new();
             for repo_cfg in &repos {
                 let mut seen_reviews = std::collections::HashSet::new();
-                match crate::github::list_pr_reviews(
-                    &client,
-                    &repo_cfg.owner,
-                    &repo_cfg.repo,
-                )
-                .await
+                match crate::github::list_pr_reviews(&client, &repo_cfg.owner, &repo_cfg.repo).await
                 {
                     Err(e) => {
                         tracing::error!(

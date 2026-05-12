@@ -80,10 +80,7 @@ impl GitHubClient {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "agent-orchestrator/0.1");
 
-        let resp = request
-            .send()
-            .await
-            .context("sending GitHub API request")?;
+        let resp = request.send().await.context("sending GitHub API request")?;
 
         // Extract and track rate limit headers.
         let remaining = resp
@@ -116,9 +113,7 @@ impl GitHubClient {
                 || body.contains("abuse")
                 || remaining.is_some_and(|r| r == 0);
 
-            if is_rate_limited
-                && let Some(sleep_dur) = calculate_sleep_until_reset(reset)
-            {
+            if is_rate_limited && let Some(sleep_dur) = calculate_sleep_until_reset(reset) {
                 tracing::warn!(
                     "GitHub API rate limit hit. Sleeping {:.1}s until reset (remaining={}).",
                     sleep_dur.as_secs_f64(),
@@ -128,7 +123,8 @@ impl GitHubClient {
 
                 // Retry once after sleeping. Build a fresh request since
                 // the previous one was already consumed.
-                let retry = self.client
+                let retry = self
+                    .client
                     .get(url)
                     .header("Authorization", format!("Bearer {}", self.token))
                     .header("Accept", "application/vnd.github+json")
@@ -153,7 +149,10 @@ impl GitHubClient {
             }
 
             // Not a rate limit 403 — return the error.
-            anyhow::bail!("{}", format_github_error(reqwest::StatusCode::FORBIDDEN, &body));
+            anyhow::bail!(
+                "{}",
+                format_github_error(reqwest::StatusCode::FORBIDDEN, &body)
+            );
         }
 
         // --- Proactive backoff: remaining is critically low on a success ---
@@ -192,7 +191,8 @@ fn calculate_sleep_until_reset(reset_epoch: Option<u64>) -> Option<Duration> {
     }
 
     let sleep_secs = reset_epoch - now_epoch;
-    let sleep_dur = Duration::from_secs(sleep_secs).clamp(MIN_BACKOFF_DURATION, MAX_BACKOFF_DURATION);
+    let sleep_dur =
+        Duration::from_secs(sleep_secs).clamp(MIN_BACKOFF_DURATION, MAX_BACKOFF_DURATION);
     Some(sleep_dur)
 }
 
@@ -232,9 +232,7 @@ pub async fn list_assigned_issues(
         let url = format!(
             "https://api.github.com/repos/{owner}/{repo}/issues?state=open&assignee={assigned_to}&creator={creator}&per_page=100&page={page}"
         );
-        let resp = client
-            .send_request(client.client.get(&url))
-            .await?;
+        let resp = client.send_request(client.client.get(&url)).await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -288,9 +286,7 @@ pub async fn list_pr_reviews(
         let url = format!(
             "https://api.github.com/repos/{owner}/{repo}/pulls?state=open&per_page=100&page={page}"
         );
-        let resp = client
-            .send_request(client.client.get(&url))
-            .await?;
+        let resp = client.send_request(client.client.get(&url)).await?;
 
         let status = resp.status();
         if !status.is_success() {
