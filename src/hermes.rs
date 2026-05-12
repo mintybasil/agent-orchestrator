@@ -19,8 +19,9 @@ fn timestamp_line(line: &str) -> String {
 /// the file in place. This provides parity with the old pipe-draining
 /// architecture which timestamped lines as they streamed in.
 fn timestamp_log_file(path: &Path) -> Result<()> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read log file for timestamping {:?}: {}", path, e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        anyhow::anyhow!("failed to read log file for timestamping {:?}: {}", path, e)
+    })?;
 
     let mut timestamped = String::new();
     for line in content.lines() {
@@ -91,7 +92,10 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
     // Wrap in shell with file redirection
     let log_file_str = args.log_file.to_string_lossy();
     let error_file_str = args.error_file.to_string_lossy();
-    let shell_command = format!("{} > '{}' 2> '{}'", hermes_cmd, log_file_str, error_file_str);
+    let shell_command = format!(
+        "{} > '{}' 2> '{}'",
+        hermes_cmd, log_file_str, error_file_str
+    );
 
     let mut cmd = Command::new("sh");
     cmd.arg("-c").arg(&shell_command);
@@ -301,7 +305,10 @@ mod tests {
         // Empty file produces a single empty timestamped line (or empty output)
         let result = std::fs::read_to_string(&log_path).unwrap();
         // An empty file has 0 lines from .lines(), so the output should be empty
-        assert!(result.is_empty(), "empty file should produce empty timestamped output");
+        assert!(
+            result.is_empty(),
+            "empty file should produce empty timestamped output"
+        );
     }
 
     #[test]
@@ -328,7 +335,10 @@ mod tests {
         // isn't available in test. Instead, test the core redirection pattern.
         let log_file_str = log_path.to_string_lossy();
         let error_file_str = error_path.to_string_lossy();
-        let shell_command = format!("echo 'hello from test' > '{}' 2> '{}'", log_file_str, error_file_str);
+        let shell_command = format!(
+            "echo 'hello from test' > '{}' 2> '{}'",
+            log_file_str, error_file_str
+        );
 
         let status = Command::new("sh")
             .arg("-c")
@@ -362,7 +372,10 @@ mod tests {
 
         // Error file should be empty (no stderr from echo)
         let error_contents = std::fs::read_to_string(&error_path).unwrap();
-        assert!(error_contents.is_empty(), "error file should be empty on success");
+        assert!(
+            error_contents.is_empty(),
+            "error file should be empty on success"
+        );
     }
 
     /// Test that invoke reads the error file when the command exits non-zero.
