@@ -71,6 +71,7 @@ prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Wr
 harness = { type = "hermes", profile = "cto" }
 # provider = "openai"   # optional: passes --provider to hermes
 # model = "o3"          # optional: passes --model to hermes
+# max_turns = 10        # optional: passes --max-turns to hermes
 
 [[steps]]
 name = "implement"

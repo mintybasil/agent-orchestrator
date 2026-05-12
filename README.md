@@ -69,14 +69,14 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider`, `model`, and `max_turns` |
 
 ### Hermes invocation
 
 Each step runs:
 
 ```
-hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>]
+hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>] [--max-turns <n>]
 ```
 
 ### Template placeholders
