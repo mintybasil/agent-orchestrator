@@ -33,11 +33,7 @@ pub enum Hook {
 /// Execute a single hook, resolving any template placeholders in its arguments.
 ///
 /// On failure writes a human-readable message to `error_path` and returns Err.
-pub fn run_hook(
-    hook: &Hook,
-    vars: &HashMap<String, String>,
-    error_path: &Path,
-) -> Result<()> {
+pub fn run_hook(hook: &Hook, vars: &HashMap<String, String>, error_path: &Path) -> Result<()> {
     match hook {
         Hook::FileNotEmpty { path: raw_path } => {
             let path = render(raw_path, vars);

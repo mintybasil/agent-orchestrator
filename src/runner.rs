@@ -209,12 +209,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------
     for hook in &step.pre_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path).map_err(
-            |e| {
-                tracing::error!("pre-hook FAILED: {}", e);
-                e
-            },
-        )?;
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(|e| {
+            tracing::error!("pre-hook FAILED: {}", e);
+            e
+        })?;
     }
 
     let harness = step.harness.build();
@@ -243,12 +241,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 
     // --- Post-hooks ----------------------------------------------------------
     for hook in &step.post_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path).map_err(
-            |e| {
-                tracing::error!(step = step.name, "post-hook FAILED: {}", e);
-                e
-            },
-        )?;
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(|e| {
+            tracing::error!(step = step.name, "post-hook FAILED: {}", e);
+            e
+        })?;
     }
 
     tracing::info!("Step completed");
