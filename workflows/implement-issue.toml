@@ -34,15 +34,14 @@ path = "{{output_path}}/plan.md"
 [[steps]]
 name = "Implement"
 prompt_template = """
-We have a plan in {{output_path}}/plan.md to address issue #{{issue_number}} in {{owner}}/{{repo}}. Use the executing-plans skill to implement the plan.
+Please complete the following steps:
 
-Push your changes to a new branch (zeroklaw/<branch-name>) and open a draft PR. Make sure to include "Closes #{{issue_number}}" somewhere in the PR description.
-
-Before making any commit make sure to run linters and tests locally.
-
-Once the PR is open, check that the CI passes. If there are any CI failures or merge conflicts, fix them.
-
-Once CI passes, do a final review to ensure all documentation (README.md, AGENTS.md, etc) have been updated. Then convert the PR from a draft to a ready for review PR, and request a review from @mintybasil.
+1. Read the plan in {{output_path}}/plan.md and review the corresponding issue #{{issue_number}} in {{owner}}/{{repo}}.
+2. Implement the plan in your workspace. Push your changes to a new branch (zeroklaw/<branch-name>).
+3. Run the tests and linters locally and fix any issues. Make sure to update docuentation (README.md, AGENTS.md, etc) as needed.
+4. Open a draft PR, and make sure to include "Closes #{{issue_number}}" somewhere in the PR description.
+5. Ensure that CI is passing and that there are no merge conflicts. Please update the PR description if any changes are required.
+6. Convert the PR from a draft to a ready for review PR, and request a review from @mintybasil.
 """
 harness = { type = "hermes", profile = "swe" }
 
