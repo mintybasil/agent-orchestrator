@@ -84,4 +84,5 @@ harness = { type = "hermes", profile = "cto" }
 # path = "{{output_path}}/triage.md"
 
 # [[steps.post_hooks]]
-# type = "push_code"
+# type = "file_not_empty"
+# path = "{{output_path}}/triage.md"

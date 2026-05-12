@@ -22,8 +22,6 @@ struct StepContext {
     /// This may be the worktree, the repo, or the event workspace.
     work_dir: PathBuf,
     key: String,
-    token: String,
-    current_exe: PathBuf,
 }
 
 /// Shared context for all steps in a single event run.
@@ -36,10 +34,6 @@ struct RunContext {
     vars: HashMap<String, String>,
     /// Human-readable event label for logging.
     key: String,
-    /// GitHub token for git auth.
-    token: String,
-    /// Path to this binary (used as GIT_ASKPASS helper).
-    current_exe: PathBuf,
     /// Whether to also print harness output to terminal.
     show_logs: bool,
 }
@@ -153,8 +147,6 @@ pub async fn run_workflow(
         harness_work_dir,
         vars,
         key: key.to_string(),
-        token: token.into(),
-        current_exe: current_exe.into(),
         show_logs,
     };
 
@@ -204,8 +196,6 @@ async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
             prompt_path,
             work_dir: ctx.harness_work_dir.clone(),
             key: ctx.key.clone(),
-            token: ctx.token.clone(),
-            current_exe: ctx.current_exe.clone(),
         };
 
         run_step(step, &step_ctx, &ctx.vars).await?
@@ -219,7 +209,7 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------
     for hook in &step.pre_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(
             |e| {
                 tracing::error!("pre-hook FAILED: {}", e);
                 e
@@ -253,7 +243,7 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 
     // --- Post-hooks ----------------------------------------------------------
     for hook in &step.post_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(
             |e| {
                 tracing::error!(step = step.name, "post-hook FAILED: {}", e);
                 e
