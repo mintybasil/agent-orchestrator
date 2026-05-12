@@ -186,15 +186,16 @@ pub async fn run_workflow(
 /// Run all workflow steps sequentially.
 async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
     for (idx, step) in steps.iter().enumerate() {
+        let sanitized_name = step.name.replace(' ', "-");
         let error_path = ctx
             .workspace_dir
-            .join(format!("step_{:02}_{}.error", idx, step.name));
+            .join(format!("step_{:02}_{}.error", idx, sanitized_name));
         let log_path = ctx
             .workspace_dir
-            .join(format!("step_{:02}_{}.log", idx, step.name));
+            .join(format!("step_{:02}_{}.log", idx, sanitized_name));
         let prompt_path = ctx
             .workspace_dir
-            .join(format!("step_{:02}_{}.prompt", idx, step.name));
+            .join(format!("step_{:02}_{}.prompt", idx, sanitized_name));
 
         let step_ctx = StepContext {
             error_path,
@@ -322,6 +323,46 @@ mod tests {
         // Git branch names cannot contain spaces, control chars, or certain special chars.
         // The ao/ prefix and sanitized label + timestamp should be safe.
         assert!(!branch.contains(' '));
+    }
+
+    #[test]
+    fn step_filenames_replace_spaces_with_hyphens() {
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let step_name = "Address Review";
+        let sanitized_name = step_name.replace(' ', "-");
+        let idx = 0;
+
+        let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
+        let error_path = workspace_dir.join(format!("step_{:02}_{}.error", idx, sanitized_name));
+        let prompt_path = workspace_dir.join(format!("step_{:02}_{}.prompt", idx, sanitized_name));
+
+        assert_eq!(log_path, PathBuf::from("/tmp/workspace/step_00_Address-Review.log"));
+        assert_eq!(error_path, PathBuf::from("/tmp/workspace/step_00_Address-Review.error"));
+        assert_eq!(prompt_path, PathBuf::from("/tmp/workspace/step_00_Address-Review.prompt"));
+    }
+
+    #[test]
+    fn step_filenames_without_spaces_unchanged() {
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let step_name = "triage";
+        let sanitized_name = step_name.replace(' ', "-");
+        let idx = 0;
+
+        let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
+
+        assert_eq!(log_path, PathBuf::from("/tmp/workspace/step_00_triage.log"));
+    }
+
+    #[test]
+    fn step_filenames_multiple_spaces_replaced() {
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let step_name = "Fix Bug And Test";
+        let sanitized_name = step_name.replace(' ', "-");
+        let idx = 1;
+
+        let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
+
+        assert_eq!(log_path, PathBuf::from("/tmp/workspace/step_01_Fix-Bug-And-Test.log"));
     }
 
     #[test]

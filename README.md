@@ -183,3 +183,6 @@ the steps and repos they were started with.
         ├── step_NN_<name>.error # stderr on failure only
         └── step_NN_<name>.md    # Step output files written by hermes
 ```
+
+> **Note:** Spaces in step names are replaced with hyphens in filenames
+> (e.g. step name "Address Review" → `step_00_Address-Review.log`).
