@@ -161,7 +161,6 @@ pub async fn run_workflow(
             branch,
             token,
             current_exe,
-            &git_config.default_branch,
         ) {
             tracing::error!("worktree cleanup failed: {}", cleanup_err);
             // If the workflow itself succeeded, the cleanup error becomes the result.
@@ -256,15 +255,17 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 ///
 /// Per the spec:
 /// - If there are uncommitted changes, error and LEAVE the worktree.
-/// - If there are unpushed commits, push them. Error if push fails (leave worktree).
-/// - If clean and pushed, remove the worktree and delete its branch.
+/// - If clean, remove the worktree and delete its branch.
+///
+/// Note: pushing unpushed commits was previously attempted here, but removed
+/// because the worktree branch name (`ao/<event-label>-<timestamp>`) differs
+/// from whatever branch the agent pushes to, making push detection unreliable.
 fn cleanup_worktree(
     repo_path: &Path,
     worktree_path: &Path,
     branch: &str,
     token: &str,
     current_exe: &Path,
-    default_branch: &str,
 ) -> Result<()> {
     // Check for uncommitted changes.
     if git::has_uncommitted_changes(worktree_path, token, current_exe)? {
@@ -274,12 +275,7 @@ fn cleanup_worktree(
         );
     }
 
-    // Check for unpushed commits.
-    if git::has_unpushed_commits(worktree_path, default_branch, token, current_exe)? {
-        git::push_commits(worktree_path, token, current_exe)?;
-    }
-
-    // Safe to remove — clean and pushed.
+    // Clean — safe to remove.
     git::remove_worktree(repo_path, worktree_path, branch, token, current_exe)
 }
 

@@ -31,7 +31,7 @@ src/
   main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
   askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
   config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
-  git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
+  git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, ASKPASS auth
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
@@ -66,7 +66,6 @@ each issue before running steps, and cleans it up afterward:
 1. **Before steps**: `git worktree add -b <branch> <path> <default_branch>` creates a unique branch (`ao/<event-label>-<timestamp>`) and checks it out at `<data-dir>/<owner>/<repo>/<issue_number>/worktree-<N>`. Each worktree gets its own branch to avoid git's restriction against multiple checkouts of the same branch.
 2. **After steps**: cleanup runs:
    - If uncommitted changes exist → error, worktree left for manual inspection
-   - If unpushed commits exist → push them, then remove worktree + delete branch
    - If clean → remove worktree with `git worktree remove --force` and delete the branch with `git branch -D`
 
 ### Triggers

@@ -342,50 +342,6 @@ pub fn has_uncommitted_changes(
     Ok(!output.status.success())
 }
 
-/// Check for unpushed commits in the given directory.
-///
-/// Returns `Ok(true)` if there are local commits not on the remote,
-/// `Ok(false)` if up-to-date.
-pub fn has_unpushed_commits(
-    work_dir: &Path,
-    default_branch: &str,
-    token: &str,
-    current_exe: &Path,
-) -> anyhow::Result<bool> {
-    let upstream = format!("origin/{}", default_branch);
-    let output = git_command(token, current_exe)
-        .args(["log", &upstream, "..HEAD", "--oneline"])
-        .current_dir(work_dir)
-        .output()
-        .context("failed to spawn git log")?;
-
-    Ok(output.status.success() && !output.stdout.is_empty())
-}
-
-/// Push commits from the given directory to the remote.
-pub fn push_commits(work_dir: &Path, token: &str, current_exe: &Path) -> anyhow::Result<()> {
-    tracing::info!("Pushing unpushed commits...");
-
-    let output = git_command(token, current_exe)
-        .args(["push"])
-        .current_dir(work_dir)
-        .output()
-        .context("failed to spawn git push")?;
-
-    if output.status.success() {
-        tracing::info!("Push succeeded");
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let scrubbed = scrub_credentials(&stderr);
-        anyhow::bail!(
-            "git push failed (exit code {:?}): {}",
-            output.status.code(),
-            scrubbed
-        );
-    }
-}
-
 /// Strip GitHub token patterns from a string before logging.
 ///
 /// Defense-in-depth: git shouldn't include credentials in stderr when using
