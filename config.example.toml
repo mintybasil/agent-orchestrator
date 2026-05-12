@@ -7,12 +7,12 @@
 
 # ── Git configuration ─────────────────────────────────────────────────
 # Controls how the orchestrator manages the local repository clone and
-# optional per-issue worktrees.
+# optional per-event worktrees.
 #
 # clone = true (default): clone/pull the repo into <data-dir>/<owner>/<repo>/repo/
 # clone = false: skip git operations entirely (no repo checkout)
 # worktree = false (default): agent runs in the shared repo checkout
-# worktree = true: create a fresh git worktree per issue, cleaned up after
+# worktree = true: create a fresh git worktree per event, cleaned up after
 # default_branch = "main" (default): branch used for git pull and worktree creation
 #
 # NOTE: worktree = true requires clone = true (enforced on startup).
@@ -26,6 +26,7 @@ default_branch = "main"
 # What initiates a workflow run. Supported types:
 #   - github_issue_assigned: polls for issues assigned to a user
 #   - github_pr_review: polls for PR reviews/comments by allowed users
+#   - local_file: watches a local directory for files matching a glob pattern
 # Multiple triggers can be defined.
 
 [[triggers]]
@@ -36,6 +37,11 @@ allowed_users = ["your-github-username"]
 # [[triggers]]
 # type = "github_pr_review"
 # allowed_users = ["your-github-username"]
+
+# [[triggers]]
+# type = "local_file"
+# path = "/path/to/watch"
+# pattern = "*.md"   # optional glob filter (default: "*")
 
 # ── Repos ─────────────────────────────────────────────────────────────
 
@@ -50,10 +56,14 @@ repo = "your-repo"
 # ]
 
 # ── Workflow steps ────────────────────────────────────────────────────
-# Executed sequentially for each triggered issue.
-# Template placeholders:
-#   {{owner}}, {{repo}}, {{issue_number}}, {{output_path}},
-#   {{default_branch}}, {{repo_path}} (path to the base repo clone; empty when git.clone = false)
+# Executed sequentially for each triggered event.
+# Global template placeholders:
+#   {{owner}}, {{repo}}, {{output_path}}, {{default_branch}},
+#   {{repo_path}} (path to the base repo clone; empty when git.clone = false)
+# Trigger-specific placeholders (merged at runtime):
+#   github_issue_assigned: {{issue_number}}
+#   github_pr_review: {{pr_number}}
+#   local_file: {{file_name}}, {{file_path}}
 
 [[steps]]
 name = "triage"
