@@ -539,7 +539,10 @@ pattern = "*.md"
             variables: vars,
         };
         assert_eq!(event.variables.get("pr_number"), Some(&"99".to_string()));
-        assert_eq!(event.variables.get("review_id"), Some(&"1234567".to_string()));
+        assert_eq!(
+            event.variables.get("review_id"),
+            Some(&"1234567".to_string())
+        );
         assert_eq!(event.variables.get("issue_number"), None);
         assert_eq!(event.key, "99/1234567");
         assert_eq!(event.label, "acme/project#99_review-1234567");
