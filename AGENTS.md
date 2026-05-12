@@ -39,7 +39,7 @@ src/
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
   template.rs   -- {{key}} placeholder renderer + unit tests
-  trigger.rs    -- Generalized trigger trait + TriggerConfig enum
+  trigger.rs    -- Generalized trigger trait + TriggerConfig enum; EventKey, TriggerEvent, LocalFileTrigger
   workflow.rs   -- Step type (harness-agnostic; harness-specific options live in HarnessConfig)
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
 data/                -- Runtime data dir (gitignored); created on first run
@@ -77,11 +77,38 @@ trait and are specified in config via `[[triggers]]` tables.
 Currently supported:
 - `github_issue_assigned` — polls GitHub for issues assigned to a user
 - `github_pr_review` — polls GitHub for PR reviews/comments by allowed users
+- `local_file` — watches a local directory for files matching a glob pattern
+
+Each trigger implementation owns its own credentials (injected at construction
+time via `TriggerConfig::build()`). The `Trigger::poll()` method is fully
+agnostic — no GitHub-specific arguments are passed. This means new event
+sources (cron, webhooks, etc.) can be added without modifying core
+poller/dispatcher logic.
+
+### TriggerEvent and EventKey
+
+`TriggerEvent` is the uniform event struct produced by all triggers. It
+carries:
+
+| Field | Purpose |
+|---|---|
+| `owner` / `repo` | Repository identifiers (or `"local"` for non-GitHub triggers) |
+| `key` | Opaque dedup string (e.g. `"42"`, `"99/1234567"`) |
+| `workspace_id` | Directory name under the data dir (e.g. `"42"`, `"99_review-1234567"`) |
+| `number` | Numeric ID (0 when not applicable) |
+| `label` | Human-readable label for logging |
+| `variables` | Trigger-specific template variables (merged into step prompts) |
+
+`EventKey` is derived from `TriggerEvent` via `to_event_key()` and is used by
+the runner to construct workspace paths and template variables. `EventKey` is
+defined in `src/trigger.rs` (its canonical location) and re-exported from
+`runner.rs` for backward compatibility.
 
 Adding a new trigger type:
 1. Add a variant to `TriggerConfig` in `src/trigger.rs`
-2. Add a struct implementing `Trigger`
-3. Add a match arm in `TriggerConfig::build()`
+2. Add a struct implementing `Trigger` (own any credentials as fields)
+3. Add a match arm in `TriggerConfig::build()` (inject token/credentials here)
+4. Add a match arm in any exhaustive `TriggerConfig` matches (e.g. `config.rs` tests)
 
 ### Hooks
 
@@ -98,7 +125,7 @@ Harnesses define **which agent backend runs a step**. They implement the
 
 Each `HarnessConfig` variant carries **harness-specific options** — the Step
 struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
-`profile`, `provider`, and `model` because those are hermes CLI flags, not
+`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI flags, not
 generic step concerns.
 
 **Note**: Worktree management is handled by the orchestrator (via `[git]`
@@ -161,6 +188,8 @@ Each monitored repo gets a directory under the data dir:
 For issues, `workspace_id` is the issue number (e.g. `42`).
 For PR reviews, `workspace_id` includes the review ID to ensure each review
 event gets its own discrete directory (e.g. `99_review-1234567`).
+For local file triggers, `workspace_id` is derived from the file stem (e.g.
+`plan` for a file named `plan.md`).
 
 Before each workflow run, the orchestrator ensures the repo exists:
 - **First run**: `git clone` into the `repo/` directory using `GIT_ASKPASS` for authentication
@@ -190,10 +219,10 @@ only.
 
 ## Additional architecture notes
 
-**Concurrency model**: Each eligible issue is dispatched as a tokio task.
+**Concurrency model**: Each eligible event is dispatched as a tokio task.
 `in_flight: HashSet<String>` prevents double-dispatch within a tick.
 `permanently_failed: HashSet<String>` prevents within-run retry of failed
-issues (they are only retried on daemon restart, per spec). Both sets and
+events (they are only retried on daemon restart, per spec). Both sets and
 `completed: HashSet<String>` are wrapped in `Arc<Mutex<_>>`.
 
 A `tokio::sync::Semaphore` (permit count from `--limit`) caps the number of
@@ -246,6 +275,7 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 | `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
 | `--model <name>` | `model` field in HarnessConfig::Hermes | optional |
+| `--max-turns <n>` | `max_turns` field in HarnessConfig::Hermes | optional |
 
 The working directory for the harness invocation depends on `[git]` config:
 - **worktree = true**: invoked from the per-issue worktree directory
@@ -288,6 +318,11 @@ allowed_users = ["your-github-username"]
 # [[triggers]]
 # type = "github_pr_review"
 # allowed_users = ["your-github-username"]
+
+# [[triggers]]
+# type = "local_file"
+# path = "/path/to/watch"
+# pattern = "*.md"   # optional glob filter (default: "*")
 ```
 
 ### Step format
@@ -297,7 +332,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3" }
+# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3", max_turns = 10 }
 
 # Optional pre-hooks (run before the agent harness)
 [[steps.pre_hooks]]
@@ -322,9 +357,17 @@ type = "push_code"
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
 | `{{default_branch}}` | Default branch from git config (e.g. `main`) |
-| `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
+| `{{output_path}}` | Path to the event data directory (`<data-dir>/<owner>/<repo>/<workspace_id>/`), created before the first step runs |
 | `{{repo_path}}` | Path to the base repository clone (`<data-dir>/<owner>/<repo>/repo/`); empty string when `git.clone = false` |
+
+Trigger-specific placeholders are merged into the template variables at
+runtime. Available variables depend on the trigger type:
+
+| Trigger | Extra placeholders |
+|---|---|
+| `github_issue_assigned` | `{{issue_number}}` |
+| `github_pr_review` | `{{pr_number}}` |
+| `local_file` | `{{file_name}}`, `{{file_path}}` |
 
 ### Hook types
 
@@ -354,11 +397,11 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 - `--interval` sets the poll interval in seconds; defaults to 60.
 - `--show-logs` flag: when set, harness output is printed to the terminal in addition to being written to log files. Log files are always written.
 
-## Debugging a failed issue
+## Debugging a failed event
 
-Failed issues are written to `<data-dir>/failed.json` with a timestamp and error
+Failed events are written to `<data-dir>/failed.json` with a timestamp and error
 message. The stderr capture for the failing harness invocation is written to
-`<data-dir>/{owner}/{repo}/{issue_number}/step_NN_<name>.error`.
+`<data-dir>/{owner}/{repo}/{workspace_id}/step_NN_<name>.error`.
 
-To retry a failed issue, restart the daemon (the `permanently_failed` set is
+To retry a failed event, restart the daemon (the `permanently_failed` set is
 in-memory only).

@@ -127,10 +127,12 @@ harness = { type = "hermes", profile = "cto" }
                 profile,
                 provider,
                 model,
+                max_turns,
             } => {
                 assert_eq!(profile, "cto");
                 assert!(provider.is_none());
                 assert!(model.is_none());
+                assert!(max_turns.is_none());
             }
         }
     }

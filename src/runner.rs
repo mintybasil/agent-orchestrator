@@ -2,6 +2,8 @@ use crate::config::GitConfig;
 use crate::git;
 use crate::hooks;
 use crate::template::render;
+// Re-export EventKey so consumers that imported from runner still compile.
+pub use crate::trigger::EventKey;
 use crate::workflow::Step;
 use anyhow::Result;
 use chrono::Utc;
@@ -9,31 +11,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
-
-/// Identifies a trigger event uniquely (issue, PR review, etc.).
-#[derive(Debug)]
-pub struct EventKey {
-    pub owner: String,
-    pub repo: String,
-    /// Opaque numeric identifier (issue number or PR number).
-    /// Used for logic that specifically needs the issue/PR number.
-    pub number: u64,
-    /// Unique workspace identifier for data directory paths.
-    /// For issues this is just the number (e.g. "42"),
-    /// for PR reviews this includes the review ID (e.g. "99_review-1234567").
-    pub workspace_id: String,
-    /// Human-readable label for logging (e.g. "acme/project#42" for issues,
-    /// "acme/project#99_review-1234567" for PR reviews).
-    pub label: String,
-    /// Trigger-specific template variables carried from the TriggerEvent.
-    pub variables: HashMap<String, String>,
-}
-
-impl std::fmt::Display for EventKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.label)
-    }
-}
 
 struct StepContext {
     error_path: PathBuf,

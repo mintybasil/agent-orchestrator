@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 
 use crate::config::GitConfig;
-use crate::runner::{EventKey, run_workflow};
+use crate::runner::run_workflow;
+use crate::trigger::EventKey;
 use crate::workflow::Step;
 
 /// Message sent from the poller to the dispatcher for each discovered event.
