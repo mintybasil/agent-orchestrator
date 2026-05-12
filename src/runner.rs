@@ -336,9 +336,18 @@ mod tests {
         let error_path = workspace_dir.join(format!("step_{:02}_{}.error", idx, sanitized_name));
         let prompt_path = workspace_dir.join(format!("step_{:02}_{}.prompt", idx, sanitized_name));
 
-        assert_eq!(log_path, PathBuf::from("/tmp/workspace/step_00_Address-Review.log"));
-        assert_eq!(error_path, PathBuf::from("/tmp/workspace/step_00_Address-Review.error"));
-        assert_eq!(prompt_path, PathBuf::from("/tmp/workspace/step_00_Address-Review.prompt"));
+        assert_eq!(
+            log_path,
+            PathBuf::from("/tmp/workspace/step_00_Address-Review.log")
+        );
+        assert_eq!(
+            error_path,
+            PathBuf::from("/tmp/workspace/step_00_Address-Review.error")
+        );
+        assert_eq!(
+            prompt_path,
+            PathBuf::from("/tmp/workspace/step_00_Address-Review.prompt")
+        );
     }
 
     #[test]
@@ -362,7 +371,10 @@ mod tests {
 
         let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
 
-        assert_eq!(log_path, PathBuf::from("/tmp/workspace/step_01_Fix-Bug-And-Test.log"));
+        assert_eq!(
+            log_path,
+            PathBuf::from("/tmp/workspace/step_01_Fix-Bug-And-Test.log")
+        );
     }
 
     #[test]
