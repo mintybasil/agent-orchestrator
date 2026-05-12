@@ -5,6 +5,7 @@
 //! adding cron, label-based, etc. in the future.
 
 use crate::config::RepoConfig;
+use crate::github::GitHubClient;
 use anyhow::Result;
 
 /// A single event produced by a trigger.
@@ -63,12 +64,10 @@ impl TriggerConfig {
                 assigned_to,
                 allowed_users,
             } => Box::new(GithubIssueAssignedTrigger {
-                client: reqwest::Client::new(),
                 assigned_to: assigned_to.clone(),
                 allowed_users: allowed_users.clone(),
             }),
             TriggerConfig::GithubPrReview { allowed_users } => Box::new(GithubPrReviewTrigger {
-                client: reqwest::Client::new(),
                 allowed_users: allowed_users.clone(),
             }),
         }
@@ -78,7 +77,6 @@ impl TriggerConfig {
 // --- GithubIssueAssigned Trigger ---
 
 pub struct GithubIssueAssignedTrigger {
-    client: reqwest::Client,
     assigned_to: String,
     allowed_users: Vec<String>,
 }
@@ -97,9 +95,8 @@ impl Trigger for GithubIssueAssignedTrigger {
     > {
         let assigned_to = self.assigned_to.clone();
         let allowed_users = self.allowed_users.clone();
-        let client = self.client.clone();
+        let client = GitHubClient::new(token.to_string());
         let repos: Vec<RepoConfig> = repos.to_vec();
-        let token = token.to_string();
 
         Box::pin(async move {
             let mut events = Vec::new();
@@ -112,7 +109,6 @@ impl Trigger for GithubIssueAssignedTrigger {
                         &repo_cfg.repo,
                         &assigned_to,
                         user,
-                        &token,
                     )
                     .await
                     {
@@ -157,7 +153,6 @@ impl Trigger for GithubIssueAssignedTrigger {
 // --- GithubPrReview Trigger ---
 
 pub struct GithubPrReviewTrigger {
-    client: reqwest::Client,
     allowed_users: Vec<String>,
 }
 
@@ -174,9 +169,8 @@ impl Trigger for GithubPrReviewTrigger {
         Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
     > {
         let allowed_users = self.allowed_users.clone();
-        let client = self.client.clone();
+        let client = GitHubClient::new(token.to_string());
         let repos: Vec<RepoConfig> = repos.to_vec();
-        let token = token.to_string();
 
         Box::pin(async move {
             let mut events = Vec::new();
@@ -186,7 +180,6 @@ impl Trigger for GithubPrReviewTrigger {
                     &client,
                     &repo_cfg.owner,
                     &repo_cfg.repo,
-                    &token,
                 )
                 .await
                 {

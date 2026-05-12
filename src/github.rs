@@ -1,6 +1,200 @@
+//! GitHub API client with rate limit tracking and adaptive backoff.
+//!
+//! The [`GitHubClient`] wraps a `reqwest::Client` and manages authentication
+//! headers, rate limit monitoring (via `X-RateLimit-Remaining` /
+//! `X-RateLimit-Reset` response headers), and automatic sleep-retry on 403
+//! responses caused by rate limiting.
+
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
+use tokio::time::sleep;
+
+/// Number of remaining requests below which we proactively sleep until reset.
+const RATE_LIMIT_LOW_THRESHOLD: u32 = 5;
+
+/// Minimum sleep duration when we cannot parse the reset timestamp.
+const MIN_BACKOFF_DURATION: Duration = Duration::from_secs(1);
+
+/// Maximum sleep duration to prevent waiting indefinitely on bad reset timestamps.
+const MAX_BACKOFF_DURATION: Duration = Duration::from_secs(300);
+
+/// GitHub API client with built-in rate limiting.
+///
+/// Wraps a `reqwest::Client` and centralises:
+/// - Authentication headers (Bearer token)
+/// - Common API headers (Accept, X-GitHub-Api-Version, User-Agent)
+/// - Rate limit header extraction and logging
+/// - Adaptive backoff when remaining budget is low or a 403 is returned
+#[derive(Debug)]
+pub struct GitHubClient {
+    client: Client,
+    token: String,
+    /// Last observed remaining request count (atomic for lock-free reads).
+    remaining: AtomicU32,
+}
+
+impl Clone for GitHubClient {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            token: self.token.clone(),
+            remaining: AtomicU32::new(self.remaining.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+impl GitHubClient {
+    /// Create a new client from a GitHub personal access token.
+    pub fn new(token: String) -> Self {
+        Self {
+            client: Client::new(),
+            token,
+            remaining: AtomicU32::new(u32::MAX),
+        }
+    }
+
+    /// Send an HTTP request with common GitHub API headers and rate limit
+    /// handling.
+    ///
+    /// Adds `Authorization`, `Accept`, `X-GitHub-Api-Version`, and `User-Agent`
+    /// headers, then:
+    ///
+    /// 1. Sends the request.
+    /// 2. Extracts `X-RateLimit-Remaining` and `X-RateLimit-Reset` from the
+    ///    response headers.
+    /// 3. If the response is 403 Forbidden and rate-limit headers indicate we
+    ///    were rate limited, sleeps until the reset time and retries once.
+    /// 4. If remaining is critically low (< {RATE_LIMIT_LOW_THRESHOLD}) on a
+    ///    successful response, proactively sleeps until the reset time to
+    ///    avoid hitting the limit.
+    pub async fn send_request(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response> {
+        let request = request
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "agent-orchestrator/0.1");
+
+        let resp = request
+            .send()
+            .await
+            .context("sending GitHub API request")?;
+
+        // Extract and track rate limit headers.
+        let remaining = resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok());
+
+        let reset = resp
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
+        if let Some(rem) = remaining {
+            self.remaining.store(rem, Ordering::Relaxed);
+            tracing::debug!("GitHub API rate limit: {} remaining", rem);
+        }
+
+        // --- Handle 403 Forbidden (possible rate limit) ---
+        if resp.status() == reqwest::StatusCode::FORBIDDEN {
+            // Save the URL before consuming the response body.
+            let url = resp.url().clone();
+
+            // Check if this is a rate limit error by looking at the response
+            // body and/or rate limit headers. GitHub returns 403 with a
+            // "rate limit exceeded" message when you exceed the limit.
+            let body = resp.text().await.unwrap_or_default();
+            let is_rate_limited = body.contains("rate limit")
+                || body.contains("abuse")
+                || remaining.is_some_and(|r| r == 0);
+
+            if is_rate_limited
+                && let Some(sleep_dur) = calculate_sleep_until_reset(reset)
+            {
+                tracing::warn!(
+                    "GitHub API rate limit hit. Sleeping {:.1}s until reset (remaining={}).",
+                    sleep_dur.as_secs_f64(),
+                    remaining.unwrap_or(0),
+                );
+                sleep(sleep_dur).await;
+
+                // Retry once after sleeping. Build a fresh request since
+                // the previous one was already consumed.
+                let retry = self.client
+                    .get(url)
+                    .header("Authorization", format!("Bearer {}", self.token))
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .header("User-Agent", "agent-orchestrator/0.1")
+                    .send()
+                    .await
+                    .context("retrying GitHub API request after rate limit backoff")?;
+
+                // Extract rate limit headers from retry response.
+                let retry_remaining = retry
+                    .headers()
+                    .get("x-ratelimit-remaining")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u32>().ok());
+                if let Some(rem) = retry_remaining {
+                    self.remaining.store(rem, Ordering::Relaxed);
+                    tracing::debug!("GitHub API rate limit after retry: {} remaining", rem);
+                }
+
+                return Ok(retry);
+            }
+
+            // Not a rate limit 403 — return the error.
+            anyhow::bail!("{}", format_github_error(reqwest::StatusCode::FORBIDDEN, &body));
+        }
+
+        // --- Proactive backoff: remaining is critically low on a success ---
+        if resp.status().is_success()
+            && let Some(rem) = remaining
+            && rem < RATE_LIMIT_LOW_THRESHOLD
+            && let Some(sleep_dur) = calculate_sleep_until_reset(reset)
+        {
+            tracing::warn!(
+                "GitHub API rate limit critically low ({remaining} remaining). \
+                 Proactively sleeping {:.1}s until reset.",
+                sleep_dur.as_secs_f64(),
+                remaining = rem,
+            );
+            sleep(sleep_dur).await;
+        }
+
+        Ok(resp)
+    }
+}
+
+/// Calculate the sleep duration until the `X-RateLimit-Reset` timestamp.
+///
+/// Returns `None` if the reset timestamp is missing or already in the past.
+/// Clamps the sleep to [{MIN_BACKOFF_DURATION}, {MAX_BACKOFF_DURATION}].
+fn calculate_sleep_until_reset(reset_epoch: Option<u64>) -> Option<Duration> {
+    let reset_epoch = reset_epoch?;
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    if reset_epoch <= now_epoch {
+        // Reset time already passed.
+        return Some(MIN_BACKOFF_DURATION);
+    }
+
+    let sleep_secs = reset_epoch - now_epoch;
+    let sleep_dur = Duration::from_secs(sleep_secs).clamp(MIN_BACKOFF_DURATION, MAX_BACKOFF_DURATION);
+    Some(sleep_dur)
+}
 
 #[derive(Debug, Deserialize)]
 struct GithubErrorResponse {
@@ -25,12 +219,11 @@ pub struct Issue {
 }
 
 pub async fn list_assigned_issues(
-    client: &Client,
+    client: &GitHubClient,
     owner: &str,
     repo: &str,
     assigned_to: &str,
     creator: &str,
-    token: &str,
 ) -> Result<Vec<Issue>> {
     let mut all_issues: Vec<Issue> = Vec::new();
     let mut page: u32 = 1;
@@ -40,14 +233,8 @@ pub async fn list_assigned_issues(
             "https://api.github.com/repos/{owner}/{repo}/issues?state=open&assignee={assigned_to}&creator={creator}&per_page=100&page={page}"
         );
         let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "agent-orchestrator/0.1")
-            .send()
-            .await
-            .context("sending GitHub API request")?;
+            .send_request(client.client.get(&url))
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -90,10 +277,9 @@ struct ReviewResponse {
 }
 
 pub async fn list_pr_reviews(
-    client: &Client,
+    client: &GitHubClient,
     owner: &str,
     repo: &str,
-    token: &str,
 ) -> Result<Vec<PrReview>> {
     let mut all_reviews: Vec<PrReview> = Vec::new();
     let mut page: u32 = 1;
@@ -103,14 +289,8 @@ pub async fn list_pr_reviews(
             "https://api.github.com/repos/{owner}/{repo}/pulls?state=open&per_page=100&page={page}"
         );
         let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "agent-orchestrator/0.1")
-            .send()
-            .await
-            .context("sending GitHub pulls list request")?;
+            .send_request(client.client.get(&url))
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -133,12 +313,7 @@ pub async fn list_pr_reviews(
                 pr.number
             );
             let reviews_resp = client
-                .get(&reviews_url)
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "agent-orchestrator/0.1")
-                .send()
+                .send_request(client.client.get(&reviews_url))
                 .await
                 .context("sending GitHub PR reviews request")?;
 
@@ -205,5 +380,69 @@ mod tests {
             format_github_error(status, body),
             "GitHub API returned 403 Forbidden (body too large or not JSON)"
         );
+    }
+
+    #[test]
+    fn test_github_client_new_stores_token() {
+        let client = GitHubClient::new("ghp_test123".to_string());
+        assert_eq!(client.token, "ghp_test123");
+        assert_eq!(client.remaining.load(Ordering::Relaxed), u32::MAX);
+    }
+
+    #[test]
+    fn test_github_client_clone_preserves_state() {
+        let client = GitHubClient::new("ghp_test123".to_string());
+        client.remaining.store(42, Ordering::Relaxed);
+        let cloned = client.clone();
+        assert_eq!(cloned.remaining.load(Ordering::Relaxed), 42);
+        assert_eq!(cloned.token, "ghp_test123");
+    }
+
+    #[test]
+    fn test_calculate_sleep_until_reset_future_timestamp() {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // Reset 10 seconds in the future.
+        let reset_epoch = now_epoch + 10;
+        let sleep_dur = calculate_sleep_until_reset(Some(reset_epoch)).unwrap();
+        assert!(
+            sleep_dur >= MIN_BACKOFF_DURATION,
+            "sleep duration should be at least MIN_BACKOFF"
+        );
+        assert!(
+            sleep_dur.as_secs() <= 10,
+            "sleep duration should not exceed the reset window"
+        );
+    }
+
+    #[test]
+    fn test_calculate_sleep_until_reset_past_timestamp() {
+        // Reset 100 seconds in the past — already expired.
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let reset_epoch = now_epoch - 100;
+        let sleep_dur = calculate_sleep_until_reset(Some(reset_epoch)).unwrap();
+        assert_eq!(sleep_dur, MIN_BACKOFF_DURATION);
+    }
+
+    #[test]
+    fn test_calculate_sleep_until_reset_none() {
+        assert!(calculate_sleep_until_reset(None).is_none());
+    }
+
+    #[test]
+    fn test_calculate_sleep_until_reset_clamps_max() {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // Reset 1 hour in the future — should be clamped to MAX.
+        let reset_epoch = now_epoch + 3600;
+        let sleep_dur = calculate_sleep_until_reset(Some(reset_epoch)).unwrap();
+        assert_eq!(sleep_dur, MAX_BACKOFF_DURATION);
     }
 }

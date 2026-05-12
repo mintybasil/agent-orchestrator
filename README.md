@@ -139,7 +139,8 @@ export GITHUB_TOKEN=***
 | `GITHUB_TOKEN` | — | GitHub API auth (required) |
 | `RUST_LOG` | `info` | Log level passed to `tracing-subscriber` |
 
-The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
+The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output
+including GitHub API rate limit tracking.
 
 On startup the daemon validates:
 
@@ -150,6 +151,14 @@ On startup the daemon validates:
 - `hermes` is present on `PATH`.
 
 Any validation failure exits with a descriptive error message.
+
+### Rate limiting
+
+The daemon tracks `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers on
+every GitHub API response. When remaining credits drop below a threshold, it
+proactively sleeps until the reset time. If a 403 rate-limit error is received,
+it automatically backs off and retries once. Sleep duration is clamped to
+[1s, 300s] to avoid indefinite waits.
 
 ### Hot-reload
 

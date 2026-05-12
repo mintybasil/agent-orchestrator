@@ -32,7 +32,7 @@ src/
   askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
   config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
   git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
-  github.rs     -- GitHub Issues API: paginated list_assigned_issues()
+  github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
@@ -212,7 +212,26 @@ on both streams simultaneously. Both streams are written to a per-step log
 file (`step_NN_<name>.log`); when `--show-logs` is set, they are also printed
 via tracing.
 
-**GitHub pagination**: `list_assigned_issues()` loops with a `page` counter
+**GitHub API client (`GitHubClient`)**: The `GitHubClient` struct in `src/github.rs`
+wraps a `reqwest::Client` and centralises authentication headers, common API
+headers (`Accept`, `X-GitHub-Api-Version`, `User-Agent`), and rate limit
+management. All GitHub API functions (`list_assigned_issues`, `list_pr_reviews`)
+take a `&GitHubClient` instead of a raw `&Client` + `&str token`. The triggers
+instantiate a `GitHubClient` per poll call, passing it down to the API functions.
+
+**Rate limit tracking**: `GitHubClient::send_request` extracts
+`X-RateLimit-Remaining` and `X-RateLimit-Reset` from every response header. The
+remaining count is stored in an `AtomicU32` and logged at `DEBUG` level. When
+remaining drops below 5, the client proactively sleeps until the reset timestamp
+to avoid hitting the limit.
+
+**Adaptive backoff**: When a 403 Forbidden response contains "rate limit"
+or "abuse" in the body (or `X-RateLimit-Remaining` is 0), the client sleeps
+until the `X-RateLimit-Reset` epoch and retries once. Sleep duration is clamped
+to [1s, 300s] to avoid indefinite waits. A non-rate-limit 403 is returned as
+an error without retry.
+
+**GitHub pagination**: `list_assigned_issues()` and `list_pr_reviews()` loop with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
 
 ## Hermes invocation (HermesHarness)
