@@ -181,6 +181,9 @@ Each monitored repo gets a directory under the data dir:
       step_NN_<name>.log   -- full harness stdout+stderr log
       step_NN_<name>.error -- stderr on failure only
       step_NN_<name>.prompt -- rendered prompt text (after template substitution)
+
+> **Note:** Spaces in step names are replaced with hyphens in filenames
+> (e.g. step name "Address Review" → `step_00_Address-Review.log`).
   completed.json         -- set of completed event keys
   failed.json            -- list of failed event entries
 ```
