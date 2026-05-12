@@ -34,7 +34,7 @@ src/
   git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
   github.rs     -- GitHub Issues API: paginated list_assigned_issues()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
-  hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
+  hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
@@ -234,19 +234,26 @@ before executing; the permit is held until the task completes.
 shared `file_lock: Arc<Mutex<()>>`. Writes are atomic: content is written to
 a `.tmp` file then renamed into place.
 
-**Pipe deadlock prevention**: `hermes.rs` drains `stderr` on a dedicated
-`std::thread` concurrently with the main thread draining `stdout`. This avoids
-deadlock when the subprocess writes enough output to fill the OS pipe buffer
-on both streams simultaneously. Both streams are written to a per-step log
-file (`step_NN_<name>.log`); when `--show-logs` is set, they are also printed
-via tracing.
+**Shell-level log capture**: `hermes.rs` invokes the hermes CLI via `sh -c`
+with `> log_file 2> error_file` redirection. This avoids OS pipe buffer
+limits (64KB) and Python TUI buffering issues that caused log truncation
+with `Stdio::piped()`. After the process exits, `timestamp_log_file()`
+post-processes the raw log to prepend `[YYYY-MM-DD HH:MM:SS UTC]` to each
+line. On non-zero exit, the error file (populated by shell stderr
+redirection) is read for the error message. When `--show-logs` is set, the
+timestamped log is also printed via tracing.
 
 **GitHub pagination**: `list_assigned_issues()` loops with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
 
 ## Hermes invocation (HermesHarness)
 
-When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
+When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`
+via shell-level file redirection:
+
+```
+sh -c 'hermes chat -q <prompt> --yolo --quiet --profile <profile> [options] > <log_file> 2> <error_file>'
+```
 
 | Flag | Source | Required |
 |---|---|---|
@@ -257,6 +264,12 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
 | `--model <name>` | `model` field in HarnessConfig::Hermes | optional |
 | `--max-turns <n>` | `max_turns` field in HarnessConfig::Hermes | optional |
+
+Shell redirection (`> log_file 2> error_file`) replaces the previous
+`Stdio::piped()` approach. This eliminates the 64KB OS pipe buffer limit
+and Python TUI buffering issues that caused log truncation. After the
+process exits, the log file is post-processed by `timestamp_log_file()`
+to add UTC timestamps to each line.
 
 The working directory for the harness invocation depends on `[git]` config:
 - **worktree = true**: invoked from the per-issue worktree directory

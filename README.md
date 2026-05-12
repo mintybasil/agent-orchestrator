@@ -69,15 +69,19 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider`, `model`, and `max_turns` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model` |
 
 ### Hermes invocation
 
-Each step runs:
+Each step runs via shell-level file redirection:
 
 ```
-hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>] [--max-turns <n>]
+sh -c 'hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>] > <log_file> 2> <error_file>'
 ```
+
+Shell redirection avoids OS pipe buffer limits that caused log truncation
+with `Stdio::piped()`. After the process exits, log lines are post-processed
+to add UTC timestamps.
 
 ### Template placeholders
 
