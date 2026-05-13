@@ -155,13 +155,7 @@ pub async fn run_workflow(
     // Clean up worktree if one was created.
     if let Some((ref wt_path, ref branch)) = worktree_info {
         let repo = repo_dir.as_ref().unwrap();
-        if let Err(cleanup_err) = cleanup_worktree(
-            repo,
-            wt_path,
-            branch,
-            token,
-            current_exe,
-        ) {
+        if let Err(cleanup_err) = cleanup_worktree(repo, wt_path, branch, token, current_exe) {
             tracing::error!("worktree cleanup failed: {}", cleanup_err);
             // If the workflow itself succeeded, the cleanup error becomes the result.
             // If it already failed, keep the original error.
