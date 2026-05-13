@@ -22,8 +22,6 @@ struct StepContext {
     /// This may be the worktree, the repo, or the event workspace.
     work_dir: PathBuf,
     key: String,
-    token: String,
-    current_exe: PathBuf,
 }
 
 /// Shared context for all steps in a single event run.
@@ -36,10 +34,6 @@ struct RunContext {
     vars: HashMap<String, String>,
     /// Human-readable event label for logging.
     key: String,
-    /// GitHub token for git auth.
-    token: String,
-    /// Path to this binary (used as GIT_ASKPASS helper).
-    current_exe: PathBuf,
     /// Whether to also print harness output to terminal.
     show_logs: bool,
 }
@@ -153,8 +147,6 @@ pub async fn run_workflow(
         harness_work_dir,
         vars,
         key: key.to_string(),
-        token: token.into(),
-        current_exe: current_exe.into(),
         show_logs,
     };
 
@@ -163,14 +155,7 @@ pub async fn run_workflow(
     // Clean up worktree if one was created.
     if let Some((ref wt_path, ref branch)) = worktree_info {
         let repo = repo_dir.as_ref().unwrap();
-        if let Err(cleanup_err) = cleanup_worktree(
-            repo,
-            wt_path,
-            branch,
-            token,
-            current_exe,
-            &git_config.default_branch,
-        ) {
+        if let Err(cleanup_err) = cleanup_worktree(repo, wt_path, branch, token, current_exe) {
             tracing::error!("worktree cleanup failed: {}", cleanup_err);
             // If the workflow itself succeeded, the cleanup error becomes the result.
             // If it already failed, keep the original error.
@@ -204,8 +189,6 @@ async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
             prompt_path,
             work_dir: ctx.harness_work_dir.clone(),
             key: ctx.key.clone(),
-            token: ctx.token.clone(),
-            current_exe: ctx.current_exe.clone(),
         };
 
         run_step(step, &step_ctx, &ctx.vars).await?
@@ -219,12 +202,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------
     for hook in &step.pre_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
-            |e| {
-                tracing::error!("pre-hook FAILED: {}", e);
-                e
-            },
-        )?;
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(|e| {
+            tracing::error!("pre-hook FAILED: {}", e);
+            e
+        })?;
     }
 
     let harness = step.harness.build();
@@ -253,12 +234,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 
     // --- Post-hooks ----------------------------------------------------------
     for hook in &step.post_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
-            |e| {
-                tracing::error!(step = step.name, "post-hook FAILED: {}", e);
-                e
-            },
-        )?;
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(|e| {
+            tracing::error!(step = step.name, "post-hook FAILED: {}", e);
+            e
+        })?;
     }
 
     tracing::info!("Step completed");
@@ -270,15 +249,17 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 ///
 /// Per the spec:
 /// - If there are uncommitted changes, error and LEAVE the worktree.
-/// - If there are unpushed commits, push them. Error if push fails (leave worktree).
-/// - If clean and pushed, remove the worktree and delete its branch.
+/// - If clean, remove the worktree and delete its branch.
+///
+/// Note: pushing unpushed commits was previously attempted here, but removed
+/// because the worktree branch name (`ao/<event-label>-<timestamp>`) differs
+/// from whatever branch the agent pushes to, making push detection unreliable.
 fn cleanup_worktree(
     repo_path: &Path,
     worktree_path: &Path,
     branch: &str,
     token: &str,
     current_exe: &Path,
-    default_branch: &str,
 ) -> Result<()> {
     // Check for uncommitted changes.
     if git::has_uncommitted_changes(worktree_path, token, current_exe)? {
@@ -288,12 +269,7 @@ fn cleanup_worktree(
         );
     }
 
-    // Check for unpushed commits.
-    if git::has_unpushed_commits(worktree_path, default_branch, token, current_exe)? {
-        git::push_commits(worktree_path, token, current_exe)?;
-    }
-
-    // Safe to remove — clean and pushed.
+    // Clean — safe to remove.
     git::remove_worktree(repo_path, worktree_path, branch, token, current_exe)
 }
 
