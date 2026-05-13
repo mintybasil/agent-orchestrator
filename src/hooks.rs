@@ -28,28 +28,12 @@ pub enum Hook {
     /// `command` is the executable name or absolute path.
     /// `args` are the arguments; each element may contain template placeholders.
     Script { command: String, args: Vec<String> },
-
-    /// Push any unpushed commits in the workspace to the remote.
-    ///
-    /// If there are unpushed commits, pushes them. If there are no new commits
-    /// (HEAD matches the upstream), the hook fails — code must be committed and
-    /// pushed for this hook to pass.
-    PushCode,
 }
 
 /// Execute a single hook, resolving any template placeholders in its arguments.
 ///
 /// On failure writes a human-readable message to `error_path` and returns Err.
-///
-/// `token` and `current_exe` are required by `PushCode` to authenticate git
-/// push operations via the ASKPASS mechanism. Other hook types ignore them.
-pub fn run_hook(
-    hook: &Hook,
-    vars: &HashMap<String, String>,
-    error_path: &Path,
-    token: &str,
-    current_exe: &Path,
-) -> Result<()> {
+pub fn run_hook(hook: &Hook, vars: &HashMap<String, String>, error_path: &Path) -> Result<()> {
     match hook {
         Hook::FileNotEmpty { path: raw_path } => {
             let path = render(raw_path, vars);
@@ -112,48 +96,6 @@ pub fn run_hook(
                 anyhow::bail!("{}", msg);
             }
         }
-
-        Hook::PushCode => {
-            let repo_path = vars
-                .get("repo_path")
-                .ok_or_else(|| anyhow::anyhow!("hook PushCode: repo_path variable missing"))?;
-            let workspace_path = Path::new(repo_path);
-
-            // Check for unpushed commits: git rev-list @{u}..HEAD
-            // This lists commits reachable from HEAD but not from the upstream branch.
-            let check_cmd = crate::git::git_command(token, current_exe)
-                .args(["rev-list", "@{u}..HEAD"])
-                .current_dir(workspace_path)
-                .output()?;
-
-            if check_cmd.status.success() && !check_cmd.stdout.is_empty() {
-                // Unpushed commits exist — push them.
-                tracing::info!("hook PushCode: unpushed commits detected, pushing to remote");
-                let push_cmd = crate::git::git_command(token, current_exe)
-                    .args(["push"])
-                    .current_dir(workspace_path)
-                    .output()?;
-
-                if !push_cmd.status.success() {
-                    let stderr = String::from_utf8_lossy(&push_cmd.stderr);
-                    let msg = format!("hook PushCode: git push failed: {}", stderr);
-                    let _ = fs::write(error_path, &msg);
-                    anyhow::bail!("{}", msg);
-                }
-                tracing::info!("hook PushCode: push succeeded");
-                Ok(())
-            } else {
-                // No unpushed commits. Either HEAD matches the upstream
-                // (nothing new to push) or git rev-list failed (no upstream set).
-                // Either way, the hook requirement is that code must have been
-                // committed and pushed — if there's nothing to push, the step
-                // didn't produce any changes.
-                let msg = "hook PushCode: no new commits found to push. \
-                    Code must be committed and pushed to pass this hook.";
-                let _ = fs::write(error_path, msg);
-                anyhow::bail!("{}", msg);
-            }
-        }
     }
 }
 
@@ -190,15 +132,6 @@ args = ["clippy"]
     }
 
     #[test]
-    fn push_code_hook_deserializes() {
-        let toml = r#"
-type = "push_code"
-"#;
-        let hook: Hook = toml::from_str(toml).unwrap();
-        assert!(matches!(hook, Hook::PushCode));
-    }
-
-    #[test]
     fn file_not_empty_succeeds_for_nonempty_file() {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         f.write_all(b"content").unwrap();
@@ -208,16 +141,7 @@ type = "push_code"
         let mut vars: HashMap<String, String> = HashMap::new();
         vars.insert("output_path".to_string(), "/tmp".to_string());
         let error_path = tempfile::NamedTempFile::new().unwrap();
-        assert!(
-            run_hook(
-                &hook,
-                &vars,
-                error_path.path(),
-                "fake-token",
-                Path::new("/fake/exe")
-            )
-            .is_ok()
-        );
+        assert!(run_hook(&hook, &vars, error_path.path()).is_ok());
     }
 
     #[test]
@@ -227,16 +151,7 @@ type = "push_code"
         };
         let vars: HashMap<String, String> = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
-        assert!(
-            run_hook(
-                &hook,
-                &vars,
-                error_path.path(),
-                "fake-token",
-                Path::new("/fake/exe")
-            )
-            .is_err()
-        );
+        assert!(run_hook(&hook, &vars, error_path.path()).is_err());
     }
 
     #[test]
@@ -247,16 +162,7 @@ type = "push_code"
         let hook = Hook::FileNotEmpty { path };
         let vars: HashMap<String, String> = HashMap::new();
         let error_path = tempfile::NamedTempFile::new().unwrap();
-        assert!(
-            run_hook(
-                &hook,
-                &vars,
-                error_path.path(),
-                "fake-token",
-                Path::new("/fake/exe")
-            )
-            .is_err()
-        );
+        assert!(run_hook(&hook, &vars, error_path.path()).is_err());
     }
 
     #[test]

@@ -2,6 +2,8 @@ use crate::config::GitConfig;
 use crate::git;
 use crate::hooks;
 use crate::template::render;
+// Re-export EventKey so consumers that imported from runner still compile.
+pub use crate::trigger::EventKey;
 use crate::workflow::Step;
 use anyhow::Result;
 use chrono::Utc;
@@ -9,31 +11,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
-
-/// Identifies a trigger event uniquely (issue, PR review, etc.).
-#[derive(Debug)]
-pub struct EventKey {
-    pub owner: String,
-    pub repo: String,
-    /// Opaque numeric identifier (issue number or PR number).
-    /// Used for logic that specifically needs the issue/PR number.
-    pub number: u64,
-    /// Unique workspace identifier for data directory paths.
-    /// For issues this is just the number (e.g. "42"),
-    /// for PR reviews this includes the review ID (e.g. "99_review-1234567").
-    pub workspace_id: String,
-    /// Human-readable label for logging (e.g. "acme/project#42" for issues,
-    /// "acme/project#99_review-1234567" for PR reviews).
-    pub label: String,
-    /// Trigger-specific template variables carried from the TriggerEvent.
-    pub variables: HashMap<String, String>,
-}
-
-impl std::fmt::Display for EventKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.label)
-    }
-}
 
 struct StepContext {
     error_path: PathBuf,
@@ -45,8 +22,6 @@ struct StepContext {
     /// This may be the worktree, the repo, or the event workspace.
     work_dir: PathBuf,
     key: String,
-    token: String,
-    current_exe: PathBuf,
 }
 
 /// Shared context for all steps in a single event run.
@@ -59,10 +34,6 @@ struct RunContext {
     vars: HashMap<String, String>,
     /// Human-readable event label for logging.
     key: String,
-    /// GitHub token for git auth.
-    token: String,
-    /// Path to this binary (used as GIT_ASKPASS helper).
-    current_exe: PathBuf,
     /// Whether to also print harness output to terminal.
     show_logs: bool,
 }
@@ -176,8 +147,6 @@ pub async fn run_workflow(
         harness_work_dir,
         vars,
         key: key.to_string(),
-        token: token.into(),
-        current_exe: current_exe.into(),
         show_logs,
     };
 
@@ -186,14 +155,7 @@ pub async fn run_workflow(
     // Clean up worktree if one was created.
     if let Some((ref wt_path, ref branch)) = worktree_info {
         let repo = repo_dir.as_ref().unwrap();
-        if let Err(cleanup_err) = cleanup_worktree(
-            repo,
-            wt_path,
-            branch,
-            token,
-            current_exe,
-            &git_config.default_branch,
-        ) {
+        if let Err(cleanup_err) = cleanup_worktree(repo, wt_path, branch, token, current_exe) {
             tracing::error!("worktree cleanup failed: {}", cleanup_err);
             // If the workflow itself succeeded, the cleanup error becomes the result.
             // If it already failed, keep the original error.
@@ -209,15 +171,16 @@ pub async fn run_workflow(
 /// Run all workflow steps sequentially.
 async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
     for (idx, step) in steps.iter().enumerate() {
+        let sanitized_name = step.name.replace(' ', "-");
         let error_path = ctx
             .workspace_dir
-            .join(format!("step_{:02}_{}.error", idx, step.name));
+            .join(format!("step_{:02}_{}.error", idx, sanitized_name));
         let log_path = ctx
             .workspace_dir
-            .join(format!("step_{:02}_{}.log", idx, step.name));
+            .join(format!("step_{:02}_{}.log", idx, sanitized_name));
         let prompt_path = ctx
             .workspace_dir
-            .join(format!("step_{:02}_{}.prompt", idx, step.name));
+            .join(format!("step_{:02}_{}.prompt", idx, sanitized_name));
 
         let step_ctx = StepContext {
             error_path,
@@ -226,8 +189,6 @@ async fn run_steps(steps: &[Step], ctx: &RunContext) -> Result<()> {
             prompt_path,
             work_dir: ctx.harness_work_dir.clone(),
             key: ctx.key.clone(),
-            token: ctx.token.clone(),
-            current_exe: ctx.current_exe.clone(),
         };
 
         run_step(step, &step_ctx, &ctx.vars).await?
@@ -241,12 +202,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
     tracing::info!("Starting step");
     // --- Pre-hooks -----------------------------------------------------------
     for hook in &step.pre_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
-            |e| {
-                tracing::error!("pre-hook FAILED: {}", e);
-                e
-            },
-        )?;
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(|e| {
+            tracing::error!("pre-hook FAILED: {}", e);
+            e
+        })?;
     }
 
     let harness = step.harness.build();
@@ -275,12 +234,10 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 
     // --- Post-hooks ----------------------------------------------------------
     for hook in &step.post_hooks {
-        hooks::run_hook(hook, vars, &ctx.error_path, &ctx.token, &ctx.current_exe).map_err(
-            |e| {
-                tracing::error!(step = step.name, "post-hook FAILED: {}", e);
-                e
-            },
-        )?;
+        hooks::run_hook(hook, vars, &ctx.error_path).map_err(|e| {
+            tracing::error!(step = step.name, "post-hook FAILED: {}", e);
+            e
+        })?;
     }
 
     tracing::info!("Step completed");
@@ -292,15 +249,17 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 ///
 /// Per the spec:
 /// - If there are uncommitted changes, error and LEAVE the worktree.
-/// - If there are unpushed commits, push them. Error if push fails (leave worktree).
-/// - If clean and pushed, remove the worktree and delete its branch.
+/// - If clean, remove the worktree and delete its branch.
+///
+/// Note: pushing unpushed commits was previously attempted here, but removed
+/// because the worktree branch name (`ao/<event-label>-<timestamp>`) differs
+/// from whatever branch the agent pushes to, making push detection unreliable.
 fn cleanup_worktree(
     repo_path: &Path,
     worktree_path: &Path,
     branch: &str,
     token: &str,
     current_exe: &Path,
-    default_branch: &str,
 ) -> Result<()> {
     // Check for uncommitted changes.
     if git::has_uncommitted_changes(worktree_path, token, current_exe)? {
@@ -310,12 +269,7 @@ fn cleanup_worktree(
         );
     }
 
-    // Check for unpushed commits.
-    if git::has_unpushed_commits(worktree_path, default_branch, token, current_exe)? {
-        git::push_commits(worktree_path, token, current_exe)?;
-    }
-
-    // Safe to remove — clean and pushed.
+    // Clean — safe to remove.
     git::remove_worktree(repo_path, worktree_path, branch, token, current_exe)
 }
 
@@ -345,6 +299,58 @@ mod tests {
         // Git branch names cannot contain spaces, control chars, or certain special chars.
         // The ao/ prefix and sanitized label + timestamp should be safe.
         assert!(!branch.contains(' '));
+    }
+
+    #[test]
+    fn step_filenames_replace_spaces_with_hyphens() {
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let step_name = "Address Review";
+        let sanitized_name = step_name.replace(' ', "-");
+        let idx = 0;
+
+        let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
+        let error_path = workspace_dir.join(format!("step_{:02}_{}.error", idx, sanitized_name));
+        let prompt_path = workspace_dir.join(format!("step_{:02}_{}.prompt", idx, sanitized_name));
+
+        assert_eq!(
+            log_path,
+            PathBuf::from("/tmp/workspace/step_00_Address-Review.log")
+        );
+        assert_eq!(
+            error_path,
+            PathBuf::from("/tmp/workspace/step_00_Address-Review.error")
+        );
+        assert_eq!(
+            prompt_path,
+            PathBuf::from("/tmp/workspace/step_00_Address-Review.prompt")
+        );
+    }
+
+    #[test]
+    fn step_filenames_without_spaces_unchanged() {
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let step_name = "triage";
+        let sanitized_name = step_name.replace(' ', "-");
+        let idx = 0;
+
+        let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
+
+        assert_eq!(log_path, PathBuf::from("/tmp/workspace/step_00_triage.log"));
+    }
+
+    #[test]
+    fn step_filenames_multiple_spaces_replaced() {
+        let workspace_dir = PathBuf::from("/tmp/workspace");
+        let step_name = "Fix Bug And Test";
+        let sanitized_name = step_name.replace(' ', "-");
+        let idx = 1;
+
+        let log_path = workspace_dir.join(format!("step_{:02}_{}.log", idx, sanitized_name));
+
+        assert_eq!(
+            log_path,
+            PathBuf::from("/tmp/workspace/step_01_Fix-Bug-And-Test.log")
+        );
     }
 
     #[test]

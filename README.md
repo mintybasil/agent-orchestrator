@@ -1,14 +1,15 @@
 # agent-orchestrator
 
-A lightweight Rust daemon with configurable triggers to initiate multi-step agent workflow against each one using an 
-agent harness
+A lightweight Rust daemon with pluggable event sources (triggers) to initiate
+multi-step agent workflows using an agent harness
 ([Hermes](https://github.com/mintybasil/hermes), or any compatible CLI agent harness).
 
 ## How it works
 
 1. On each poll tick the daemon checks whether workflow config files have changed
    and reloads them if needed (hot-reload, no restart required).
-2. The daemon calls the GitHub API for every configured trigger.
+2. Each configured trigger polls its event source (GitHub API, local filesystem,
+   etc.) to discover new events.
 3. New events are dispatched concurrently as
    tokio tasks, gated by an optional concurrency limit.
 4. Each event runs through the configured workflow steps sequentially by invoking
@@ -58,7 +59,7 @@ harness = { type = "hermes", profile = "cto" }
 
 [git]
 clone = true           # Clone/pull the repo (default: true)
-worktree = false       # Per-issue worktrees (default: false; requires clone = true)
+worktree = false       # Per-event worktrees (default: false; requires clone = true)
 default_branch = "main" # Branch for pull/worktree (default: "main")
 ```
 
@@ -72,11 +73,15 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 
 ### Hermes invocation
 
-Each step runs:
+Each step runs via shell-level file redirection:
 
 ```
-hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>]
+sh -c 'hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider>] [--model <model>] > <log_file> 2> <error_file>'
 ```
+
+Shell redirection avoids OS pipe buffer limits that caused log truncation
+with `Stdio::piped()`. After the process exits, log lines are post-processed
+to add UTC timestamps.
 
 ### Template placeholders
 
@@ -85,9 +90,16 @@ hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <provider
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
 | `{{default_branch}}` | Default branch from git config (e.g. `main`) |
-| `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Full path where this step must write its output (under `<data-dir>/{owner}/{repo}/{issue_number}/`) |
+| `{{output_path}}` | Full path where this step must write its output (under `<data-dir>/{owner}/{repo}/{workspace_id}/`) |
 | `{{repo_path}}` | Path to the base repo clone; empty when `git.clone = false` |
+
+Trigger-specific placeholders are merged at runtime depending on the trigger type:
+
+| Trigger | Extra placeholders |
+|---|---|
+| `github_issue_assigned` | `{{issue_number}}` |
+| `github_pr_review` | `{{pr_number}}` |
+| `local_file` | `{{file_name}}`, `{{file_path}}` |
 
 ### Hooks
 
@@ -104,16 +116,12 @@ args = ["{{issue_number}}"]
 [[steps.post_hooks]]
 type = "file_not_empty"
 path = "{{output_path}}"
-
-[[steps.post_hooks]]
-type = "push_code"
 ```
 
-| Hook type        | Fields            | Effect                                                                |
-|------------------|-------------------|-----------------------------------------------------------------------|
-| `file_not_empty` | `path`            | Fail if file is absent or zero bytes                                  |
-| `script`         | `command`, `args` | Spawn process; fail on non-zero exit                                  |
-| `push_code`      | N/A               | Push any unpushed commits to the remote; fail if no new commits exist |
+| Hook type        | Fields            | Effect                                               |
+|------------------|-------------------|------------------------------------------------------|
+| `file_not_empty` | `path`            | Fail if file is absent or zero bytes                  |
+| `script`         | `command`, `args` | Spawn process; fail on non-zero exit                  |
 
 ## Running
 
@@ -139,7 +147,8 @@ export GITHUB_TOKEN=***
 | `GITHUB_TOKEN` | — | GitHub API auth (required) |
 | `RUST_LOG` | `info` | Log level passed to `tracing-subscriber` |
 
-The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output.
+The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output
+including GitHub API rate limit tracking.
 
 On startup the daemon validates:
 
@@ -150,6 +159,14 @@ On startup the daemon validates:
 - `hermes` is present on `PATH`.
 
 Any validation failure exits with a descriptive error message.
+
+### Rate limiting
+
+The daemon tracks `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers on
+every GitHub API response. When remaining credits drop below a threshold, it
+proactively sleeps until the reset time. If a 403 rate-limit error is received,
+it automatically backs off and retries once. Sleep duration is clamped to
+[1s, 300s] to avoid indefinite waits.
 
 ### Hot-reload
 
@@ -169,9 +186,12 @@ the steps and repos they were started with.
 ├── failed.json                # Array of {key, timestamp, error} objects
 └── {owner}/{repo}/
     ├── repo/                  # git clone of the repo (when git.clone = true)
-    └── {issue_number}/
-        ├── worktree-{N}/        # per-issue git worktree (when git.worktree = true)
+    └── {workspace_id}/
+        ├── worktree-{N}/        # per-event git worktree (when git.worktree = true)
         ├── step_NN_<name>.log   # Full harness stdout+stderr log (always written)
         ├── step_NN_<name>.error # stderr on failure only
         └── step_NN_<name>.md    # Step output files written by hermes
 ```
+
+> **Note:** Spaces in step names are replaced with hyphens in filenames
+> (e.g. step name "Address Review" → `step_00_Address-Review.log`).

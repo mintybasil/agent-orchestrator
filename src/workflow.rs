@@ -95,25 +95,6 @@ args = ["clippy"]
     }
 
     #[test]
-    fn push_code_hook_deserializes() {
-        let steps = r#"
-[[steps]]
-name = "triage"
-prompt_template = "Do triage."
-harness = { type = "hermes", profile = "test" }
-
-[[steps.post_hooks]]
-type = "push_code"
-"#;
-        let config = parse_config(steps).unwrap();
-        assert_eq!(config.steps.len(), 1);
-        assert!(matches!(
-            config.steps[0].post_hooks[0],
-            crate::hooks::Hook::PushCode
-        ));
-    }
-
-    #[test]
     fn step_hermes_harness_with_profile() {
         let steps = r#"
 [[steps]]
@@ -127,10 +108,12 @@ harness = { type = "hermes", profile = "cto" }
                 profile,
                 provider,
                 model,
+                max_turns,
             } => {
                 assert_eq!(profile, "cto");
                 assert!(provider.is_none());
                 assert!(model.is_none());
+                assert!(max_turns.is_none());
             }
         }
     }

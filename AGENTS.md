@@ -31,15 +31,15 @@ src/
   main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
   askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
   config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
-  git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, push, ASKPASS auth
-  github.rs     -- GitHub Issues API: paginated list_assigned_issues()
+  git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, ASKPASS auth
+  github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
-  hermes.rs     -- Harness impl for the hermes CLI agent; also exposes low-level invoke()
+  hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
   template.rs   -- {{key}} placeholder renderer + unit tests
-  trigger.rs    -- Generalized trigger trait + TriggerConfig enum
+  trigger.rs    -- Generalized trigger trait + TriggerConfig enum; EventKey, TriggerEvent, LocalFileTrigger
   workflow.rs   -- Step type (harness-agnostic; harness-specific options live in HarnessConfig)
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
 data/                -- Runtime data dir (gitignored); created on first run
@@ -66,7 +66,6 @@ each issue before running steps, and cleans it up afterward:
 1. **Before steps**: `git worktree add -b <branch> <path> <default_branch>` creates a unique branch (`ao/<event-label>-<timestamp>`) and checks it out at `<data-dir>/<owner>/<repo>/<issue_number>/worktree-<N>`. Each worktree gets its own branch to avoid git's restriction against multiple checkouts of the same branch.
 2. **After steps**: cleanup runs:
    - If uncommitted changes exist → error, worktree left for manual inspection
-   - If unpushed commits exist → push them, then remove worktree + delete branch
    - If clean → remove worktree with `git worktree remove --force` and delete the branch with `git branch -D`
 
 ### Triggers
@@ -77,11 +76,38 @@ trait and are specified in config via `[[triggers]]` tables.
 Currently supported:
 - `github_issue_assigned` — polls GitHub for issues assigned to a user
 - `github_pr_review` — polls GitHub for PR reviews/comments by allowed users
+- `local_file` — watches a local directory for files matching a glob pattern
+
+Each trigger implementation owns its own credentials (injected at construction
+time via `TriggerConfig::build()`). The `Trigger::poll()` method is fully
+agnostic — no GitHub-specific arguments are passed. This means new event
+sources (cron, webhooks, etc.) can be added without modifying core
+poller/dispatcher logic.
+
+### TriggerEvent and EventKey
+
+`TriggerEvent` is the uniform event struct produced by all triggers. It
+carries:
+
+| Field | Purpose |
+|---|---|
+| `owner` / `repo` | Repository identifiers (or `"local"` for non-GitHub triggers) |
+| `key` | Opaque dedup string (e.g. `"42"`, `"99/1234567"`) |
+| `workspace_id` | Directory name under the data dir (e.g. `"42"`, `"99_review-1234567"`) |
+| `number` | Numeric ID (0 when not applicable) |
+| `label` | Human-readable label for logging |
+| `variables` | Trigger-specific template variables (merged into step prompts) |
+
+`EventKey` is derived from `TriggerEvent` via `to_event_key()` and is used by
+the runner to construct workspace paths and template variables. `EventKey` is
+defined in `src/trigger.rs` (its canonical location) and re-exported from
+`runner.rs` for backward compatibility.
 
 Adding a new trigger type:
 1. Add a variant to `TriggerConfig` in `src/trigger.rs`
-2. Add a struct implementing `Trigger`
-3. Add a match arm in `TriggerConfig::build()`
+2. Add a struct implementing `Trigger` (own any credentials as fields)
+3. Add a match arm in `TriggerConfig::build()` (inject token/credentials here)
+4. Add a match arm in any exhaustive `TriggerConfig` matches (e.g. `config.rs` tests)
 
 ### Hooks
 
@@ -98,7 +124,7 @@ Harnesses define **which agent backend runs a step**. They implement the
 
 Each `HarnessConfig` variant carries **harness-specific options** — the Step
 struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
-`profile`, `provider`, and `model` because those are hermes CLI flags, not
+`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI flags, not
 generic step concerns.
 
 **Note**: Worktree management is handled by the orchestrator (via `[git]`
@@ -154,6 +180,9 @@ Each monitored repo gets a directory under the data dir:
       step_NN_<name>.log   -- full harness stdout+stderr log
       step_NN_<name>.error -- stderr on failure only
       step_NN_<name>.prompt -- rendered prompt text (after template substitution)
+
+> **Note:** Spaces in step names are replaced with hyphens in filenames
+> (e.g. step name "Address Review" → `step_00_Address-Review.log`).
   completed.json         -- set of completed event keys
   failed.json            -- list of failed event entries
 ```
@@ -161,6 +190,8 @@ Each monitored repo gets a directory under the data dir:
 For issues, `workspace_id` is the issue number (e.g. `42`).
 For PR reviews, `workspace_id` includes the review ID to ensure each review
 event gets its own discrete directory (e.g. `99_review-1234567`).
+For local file triggers, `workspace_id` is derived from the file stem (e.g.
+`plan` for a file named `plan.md`).
 
 Before each workflow run, the orchestrator ensures the repo exists:
 - **First run**: `git clone` into the `repo/` directory using `GIT_ASKPASS` for authentication
@@ -190,10 +221,10 @@ only.
 
 ## Additional architecture notes
 
-**Concurrency model**: Each eligible issue is dispatched as a tokio task.
+**Concurrency model**: Each eligible event is dispatched as a tokio task.
 `in_flight: HashSet<String>` prevents double-dispatch within a tick.
 `permanently_failed: HashSet<String>` prevents within-run retry of failed
-issues (they are only retried on daemon restart, per spec). Both sets and
+events (they are only retried on daemon restart, per spec). Both sets and
 `completed: HashSet<String>` are wrapped in `Arc<Mutex<_>>`.
 
 A `tokio::sync::Semaphore` (permit count from `--limit`) caps the number of
@@ -205,19 +236,45 @@ before executing; the permit is held until the task completes.
 shared `file_lock: Arc<Mutex<()>>`. Writes are atomic: content is written to
 a `.tmp` file then renamed into place.
 
-**Pipe deadlock prevention**: `hermes.rs` drains `stderr` on a dedicated
-`std::thread` concurrently with the main thread draining `stdout`. This avoids
-deadlock when the subprocess writes enough output to fill the OS pipe buffer
-on both streams simultaneously. Both streams are written to a per-step log
-file (`step_NN_<name>.log`); when `--show-logs` is set, they are also printed
-via tracing.
+**Shell-level log capture**: `hermes.rs` invokes the hermes CLI via `sh -c`
+with `> log_file 2> error_file` redirection. This avoids OS pipe buffer
+limits (64KB) and Python TUI buffering issues that caused log truncation
+with `Stdio::piped()`. After the process exits, `timestamp_log_file()`
+post-processes the raw log to prepend `[YYYY-MM-DD HH:MM:SS UTC]` to each
+line. On non-zero exit, the error file (populated by shell stderr
+redirection) is read for the error message. When `--show-logs` is set, the
+timestamped log is also printed via tracing.
 
-**GitHub pagination**: `list_assigned_issues()` loops with a `page` counter
+**GitHub API client (`GitHubClient`)**: The `GitHubClient` struct in `src/github.rs`
+wraps a `reqwest::Client` and centralises authentication headers, common API
+headers (`Accept`, `X-GitHub-Api-Version`, `User-Agent`), and rate limit
+management. All GitHub API functions (`list_assigned_issues`, `list_pr_reviews`)
+take a `&GitHubClient` instead of a raw `&Client` + `&str token`. The triggers
+instantiate a `GitHubClient` per poll call, passing it down to the API functions.
+
+**Rate limit tracking**: `GitHubClient::send_request` extracts
+`X-RateLimit-Remaining` and `X-RateLimit-Reset` from every response header. The
+remaining count is stored in an `AtomicU32` and logged at `DEBUG` level. When
+remaining drops below 5, the client proactively sleeps until the reset timestamp
+to avoid hitting the limit.
+
+**Adaptive backoff**: When a 403 Forbidden response contains "rate limit"
+or "abuse" in the body (or `X-RateLimit-Remaining` is 0), the client sleeps
+until the `X-RateLimit-Reset` epoch and retries once. Sleep duration is clamped
+to [1s, 300s] to avoid indefinite waits. A non-rate-limit 403 is returned as
+an error without retry.
+
+**GitHub pagination**: `list_assigned_issues()` and `list_pr_reviews()` loop with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
 
 ## Hermes invocation (HermesHarness)
 
-When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
+When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`
+via shell-level file redirection:
+
+```
+sh -c 'hermes chat -q <prompt> --yolo --quiet --profile <profile> [options] > <log_file> 2> <error_file>'
+```
 
 | Flag | Source | Required |
 |---|---|---|
@@ -227,6 +284,13 @@ When a step uses `harness = { type = "hermes", ... }`, it calls `hermes chat`:
 | `--profile <name>` | `profile` field in HarnessConfig::Hermes | always |
 | `--provider <name>` | `provider` field in HarnessConfig::Hermes | optional |
 | `--model <name>` | `model` field in HarnessConfig::Hermes | optional |
+| `--max-turns <n>` | `max_turns` field in HarnessConfig::Hermes | optional |
+
+Shell redirection (`> log_file 2> error_file`) replaces the previous
+`Stdio::piped()` approach. This eliminates the 64KB OS pipe buffer limit
+and Python TUI buffering issues that caused log truncation. After the
+process exits, the log file is post-processed by `timestamp_log_file()`
+to add UTC timestamps to each line.
 
 The working directory for the harness invocation depends on `[git]` config:
 - **worktree = true**: invoked from the per-issue worktree directory
@@ -269,6 +333,11 @@ allowed_users = ["your-github-username"]
 # [[triggers]]
 # type = "github_pr_review"
 # allowed_users = ["your-github-username"]
+
+# [[triggers]]
+# type = "local_file"
+# path = "/path/to/watch"
+# pattern = "*.md"   # optional glob filter (default: "*")
 ```
 
 ### Step format
@@ -278,7 +347,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3" }
+# harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3", max_turns = 10 }
 
 # Optional pre-hooks (run before the agent harness)
 [[steps.pre_hooks]]
@@ -290,10 +359,6 @@ args = ["{{issue_number}}"]
 [[steps.post_hooks]]
 type = "file_not_empty"
 path = "{{output_path}}/my-step.md"
-
-# Optional: ensure committed code is pushed to the remote
-[[steps.post_hooks]]
-type = "push_code"
 ```
 
 ### Template placeholders
@@ -303,9 +368,17 @@ type = "push_code"
 | `{{owner}}` | Repository owner |
 | `{{repo}}` | Repository name |
 | `{{default_branch}}` | Default branch from git config (e.g. `main`) |
-| `{{issue_number}}` | GitHub issue number |
-| `{{output_path}}` | Path to the issue data directory (`<data-dir>/<owner>/<repo>/<issue_number>/`), created before the first step runs |
+| `{{output_path}}` | Path to the event data directory (`<data-dir>/<owner>/<repo>/<workspace_id>/`), created before the first step runs |
 | `{{repo_path}}` | Path to the base repository clone (`<data-dir>/<owner>/<repo>/repo/`); empty string when `git.clone = false` |
+
+Trigger-specific placeholders are merged into the template variables at
+runtime. Available variables depend on the trigger type:
+
+| Trigger | Extra placeholders |
+|---|---|
+| `github_issue_assigned` | `{{issue_number}}` |
+| `github_pr_review` | `{{pr_number}}`, `{{review_id}}` |
+| `local_file` | `{{file_name}}`, `{{file_path}}` |
 
 ### Hook types
 
@@ -313,7 +386,6 @@ type = "push_code"
 |---|---|---|
 | `file_not_empty` | `path` (string, supports placeholders) | Fail if file is absent or zero bytes |
 | `script` | `command` (string), `args` (array of strings, support placeholders) | Spawn process; fail on non-zero exit |
-| `push_code` | _(none)_ | Push any unpushed commits to the remote; fail if no new commits exist |
 
 Hooks run in declaration order. A failure aborts the step and marks the issue as failed.
 
@@ -335,11 +407,11 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 - `--interval` sets the poll interval in seconds; defaults to 60.
 - `--show-logs` flag: when set, harness output is printed to the terminal in addition to being written to log files. Log files are always written.
 
-## Debugging a failed issue
+## Debugging a failed event
 
-Failed issues are written to `<data-dir>/failed.json` with a timestamp and error
+Failed events are written to `<data-dir>/failed.json` with a timestamp and error
 message. The stderr capture for the failing harness invocation is written to
-`<data-dir>/{owner}/{repo}/{issue_number}/step_NN_<name>.error`.
+`<data-dir>/{owner}/{repo}/{workspace_id}/step_NN_<name>.error`.
 
-To retry a failed issue, restart the daemon (the `permanently_failed` set is
+To retry a failed event, restart the daemon (the `permanently_failed` set is
 in-memory only).
