@@ -51,3 +51,4 @@ api_key = "test-key"
         let harness = config.build();
         assert_eq!(harness.name(), "hermes-api");
     }
+}
