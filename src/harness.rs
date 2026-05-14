@@ -12,7 +12,7 @@ use std::path::Path;
 /// Log output configuration passed to harness implementations.
 ///
 /// Groups the log file path and display preference so the `Harness::run_step`
-/// signature stays within clippy's argument limit.
+/// signature stays within clippy's arguments limit.
 pub struct LogConfig {
     /// Path to the log file where stdout and stderr will be written.
     pub log_path: std::path::PathBuf,
@@ -25,6 +25,8 @@ pub struct LogConfig {
 /// Each variant carries harness-specific options. For example,
 /// `Hermes` has `profile`, `provider`, and `model`,
 /// because those are hermes CLI flags — not generic step concerns.
+///
+/// For API-based invocation, use `base_url` and `api_key` instead.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HarnessConfig {
@@ -43,6 +45,23 @@ pub enum HarnessConfig {
         #[serde(default)]
         model: Option<String>,
         /// Optional max turns passed to hermes via `--max-turns <n>`.
+        #[serde(default)]
+        max_turns: Option<u32>,
+    },
+    /// Invoke hermes via the HTTP API server.
+    ///
+    /// ```toml
+    /// harness = { type = "hermes_api", base_url = "http://localhost:8642/v1", api_key = "change-me-local-dev" }
+    /// ```
+    HermesApi {
+        /// Required: Base URL of the hermes API server (e.g., "http://localhost:8642/v1").
+        base_url: String,
+        /// Required: Bearer token for API authentication.
+        api_key: String,
+        /// Optional: Model name to use (defaults to "hermes-agent").
+        #[serde(default)]
+        model: Option<String>,
+        /// Optional max turns for the agent execution.
         #[serde(default)]
         max_turns: Option<u32>,
     },
@@ -87,6 +106,17 @@ impl HarnessConfig {
                 profile: profile.clone(),
                 provider: provider.clone(),
                 model: model.clone(),
+                max_turns: *max_turns,
+            }),
+            HarnessConfig::HermesApi {
+                base_url,
+                api_key,
+                model,
+                max_turns,
+            } => Box::new(crate::hermes::HermesApiHarness {
+                base_url: base_url.clone(),
+                api_key: api_key.clone(),
+                model: model.clone().unwrap_or_else(|| "hermes-agent".to_string()),
                 max_turns: *max_turns,
             }),
         }
@@ -179,5 +209,65 @@ worktree = true
             err.contains("worktree"),
             "error should mention the unknown field name, got: {err}"
         );
+    }
+
+    #[test]
+    fn hermes_api_config_deserializes() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "http://localhost:8642/v1"
+api_key = "test-key"
+model = "hermes-agent"
+max_turns = 5
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::HermesApi {
+                base_url,
+                api_key,
+                model,
+                max_turns,
+            } => {
+                assert_eq!(base_url, "http://localhost:8642/v1");
+                assert_eq!(api_key, "test-key");
+                assert_eq!(model, Some("hermes-agent".to_string()));
+                assert_eq!(max_turns, Some(5));
+            }
+        }
+    }
+
+    #[test]
+    fn hermes_api_config_minimal() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "http://localhost:8642/v1"
+api_key = "test-key"
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::HermesApi {
+                base_url,
+                api_key,
+                model,
+                max_turns,
+            } => {
+                assert_eq!(base_url, "http://localhost:8642/v1");
+                assert_eq!(api_key, "test-key");
+                assert!(model.is_none());
+                assert!(max_turns.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn build_hermes_api() {
+        let config = HarnessConfig::HermesApi {
+            base_url: "http://localhost:8642/v1".to_string(),
+            api_key: "test-key".to_string(),
+            model: None,
+            max_turns: None,
+        };
+        let harness = config.build();
+        assert_eq!(harness.name(), "hermes-api");
     }
 }
