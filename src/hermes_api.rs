@@ -83,8 +83,7 @@ impl Harness for HermesApiHarness {
         error_path: &Path,
         issue: &str,
         log_config: &LogConfig,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>>
-    {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
         let url = self.url.clone();
         let provider = self.provider.clone();
         let model = self.model.clone();
@@ -162,10 +161,7 @@ async fn run_api_step(
     // If a provider is specified, add it as a system-level hint.
     // The Hermes API may use this to route to the correct model.
     if let Some(p) = provider {
-        messages[0].content = format!(
-            "{}\nProvider: {}",
-            messages[0].content, p
-        );
+        messages[0].content = format!("{}\nProvider: {}", messages[0].content, p);
     }
 
     messages.push(ChatMessage {
@@ -214,11 +210,7 @@ async fn run_api_step(
         let error_content = format!("hermes_api HTTP {}: {}", status, error_detail);
         std::fs::write(error_path, &error_content).ok();
 
-        anyhow::bail!(
-            "hermes_api returned HTTP {}: {}",
-            status,
-            error_detail
-        );
+        anyhow::bail!("hermes_api returned HTTP {}: {}", status, error_detail);
     }
 
     // Parse the successful response.
@@ -360,10 +352,7 @@ mod tests {
             }
         }"#;
         let err: ApiError = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            err.error.unwrap().message.unwrap(),
-            "Invalid API key"
-        );
+        assert_eq!(err.error.unwrap().message.unwrap(), "Invalid API key");
     }
 
     #[test]
