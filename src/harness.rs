@@ -25,6 +25,8 @@ pub struct LogConfig {
 /// Each variant carries harness-specific options. For example,
 /// `Hermes` has `profile`, `provider`, and `model`,
 /// because those are hermes CLI flags — not generic step concerns.
+///
+/// For API-based invocation, use `base_url` and `api_key` instead.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HarnessConfig {
@@ -45,6 +47,20 @@ pub enum HarnessConfig {
         /// Optional max turns passed to hermes via `--max-turns <n>`.
         #[serde(default)]
         max_turns: Option<u32>,
+    },
+    /// Invoke hermes via the HTTP API server.
+    ///
+    /// ```toml
+    /// harness = { type = "hermes_api", base_url = "http://localhost:8642/v1", api_key = "change-me-local-dev" }
+    /// ```
+    HermesApi {
+        /// Required: Base URL of the hermes API server (e.g., "http://localhost:8642/v1").
+        base_url: String,
+        /// Required: Bearer token for API authentication.
+        api_key: String,
+        /// Optional: Model name to use (defaults to "hermes-agent").
+        #[serde(default)]
+        model: Option<String>,
     },
     // Future variants:
     // Cursor { binary: String, prompt: String },
@@ -88,6 +104,15 @@ impl HarnessConfig {
                 provider: provider.clone(),
                 model: model.clone(),
                 max_turns: *max_turns,
+            }),
+            HarnessConfig::HermesApi {
+                base_url,
+                api_key,
+                model,
+            } => Box::new(crate::hermes::HermesApiHarness {
+                base_url: base_url.clone(),
+                api_key: api_key.clone(),
+                model: model.clone().unwrap_or_else(|| "hermes-agent".to_string()),
             }),
         }
     }
@@ -158,8 +183,6 @@ profile = "cto"
 
     #[test]
     fn hermes_config_rejects_unknown_fields() {
-        // Ensures that misspelled or misplaced fields like `worktree` in the
-        // harness config produce a clear error instead of being silently ignored.
         let toml = r#"
 type = "hermes"
 profile = "cto"
@@ -179,5 +202,59 @@ worktree = true
             err.contains("worktree"),
             "error should mention the unknown field name, got: {err}"
         );
+    }
+
+    #[test]
+    fn hermes_api_config_deserializes() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "http://localhost:8642/v1"
+api_key = "test-key"
+model = "hermes-agent"
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::HermesApi {
+                base_url,
+                api_key,
+                model,
+            } => {
+                assert_eq!(base_url, "http://localhost:8642/v1");
+                assert_eq!(api_key, "test-key");
+                assert_eq!(model, Some("hermes-agent".to_string()));
+            }
+        }
+    }
+
+    #[test]
+    fn hermes_api_config_minimal() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "http://localhost:8642/v1"
+api_key = "test-key"
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::HermesApi {
+                base_url,
+                api_key,
+                model,
+            } => {
+                assert_eq!(base_url, "http://localhost:8642/v1");
+                assert_eq!(api_key, "test-key");
+                assert!(model.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn build_hermes_api() {
+        let config = HarnessConfig::HermesApi {
+            base_url: "http://localhost:8642/v1".to_string(),
+            api_key: "test-key".to_string(),
+            model: None,
+        };
+        let harness = config.build();
+        assert_eq!(harness.name(), "hermes-api");
     }
 }
