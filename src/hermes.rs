@@ -8,7 +8,7 @@ use std::process::Command;
 /// Prepend a UTC timestamp to a line for log file output.
 ///
 /// Format: `[YYYY-MM-DD HH:MM:SS UTC] <line>`
-fn timestamp_line(line: &str) -> String {
+pub fn timestamp_line(line: &str) -> String {
     format!("[{}] {}", Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), line)
 }
 
@@ -23,15 +23,24 @@ fn timestamp_log_file(path: &Path) -> Result<()> {
         anyhow::anyhow!("failed to read log file for timestamping {:?}: {}", path, e)
     })?;
 
-    let mut timestamped = String::new();
-    for line in content.lines() {
-        timestamped.push_str(&timestamp_line(line));
-        timestamped.push('\n');
-    }
+    let timestamped = timestamp_log_string(&content);
 
     std::fs::write(path, timestamped)
         .map_err(|e| anyhow::anyhow!("failed to write timestamped log file {:?}: {}", path, e))?;
     Ok(())
+}
+
+/// Prepend a UTC timestamp to every line of a string.
+///
+/// Used by harnesses that produce output in-memory (e.g. hermes_api)
+/// rather than via shell redirection into a file.
+pub fn timestamp_log_string(content: &str) -> String {
+    let mut result = String::new();
+    for line in content.lines() {
+        result.push_str(&timestamp_line(line));
+        result.push('\n');
+    }
+    result
 }
 
 /// Arguments for invoking the hermes CLI agent.

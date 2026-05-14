@@ -115,6 +115,7 @@ harness = { type = "hermes", profile = "cto" }
                 assert!(model.is_none());
                 assert!(max_turns.is_none());
             }
+            _ => panic!("expected Hermes harness"),
         }
     }
 

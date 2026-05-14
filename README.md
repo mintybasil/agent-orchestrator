@@ -1,8 +1,9 @@
 # agent-orchestrator
 
 A lightweight Rust daemon with pluggable event sources (triggers) to initiate
-multi-step agent workflows using an agent harness
-([Hermes](https://github.com/mintybasil/hermes), or any compatible CLI agent harness).
+multi-step agent workflows using an agent harness — either the
+[Hermes](https://github.com/mintybasil/hermes) CLI, or via the Hermes Agent
+REST API (`hermes_api` harness).
 
 ## How it works
 
@@ -51,6 +52,7 @@ repo  = "your-repo"
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
 harness = { type = "hermes", profile = "cto" }
+# harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completions" }
 
 [[steps]]
 name = "implement"
@@ -69,7 +71,7 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model`; or `type = "hermes_api"` with `url`, optional `provider`, `model`, and `max_turns` |
 
 ### Hermes invocation
 
@@ -82,6 +84,55 @@ sh -c 'hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <p
 Shell redirection avoids OS pipe buffer limits that caused log truncation
 with `Stdio::piped()`. After the process exits, log lines are post-processed
 to add UTC timestamps.
+
+### Hermes API invocation (hermes_api harness)
+
+An alternative to the CLI-based harness, `hermes_api` sends prompts directly
+to a Hermes Agent REST API endpoint over HTTP. This avoids spawning a
+subprocess and works with remote or containerised agent servers.
+
+```toml
+[[steps]]
+name = "triage"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
+harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completions" }
+# provider = "openai"   # optional
+# model = "o3"          # optional
+# max_turns = 10        # optional
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | Chat completions endpoint URL |
+| `provider` | string | no | Provider hint included in the system message |
+| `model` | string | no | Model override sent in the request body |
+| `max_turns` | integer | no | Sent as `max_tokens` in the request body |
+
+Authentication uses a Bearer token read from the `HERMES_API_KEY` environment
+variable at runtime (never stored in config). If the variable is not set, the
+step fails immediately with a clear error message.
+
+The API request follows the OpenAI chat completions format:
+
+```json
+POST /v1/chat/completions
+Authorization: Bearer <HERMES_API_KEY>
+Content-Type: application/json
+
+{
+  "model": "<model or null>",
+  "messages": [
+    {"role": "system", "content": "You are a software engineering agent...\nYour working directory is: <workspace_path>"},
+    {"role": "user", "content": "<rendered prompt>"}
+  ],
+  "max_tokens": <max_turns or null>
+}
+```
+
+The response log includes both the raw API response and the extracted
+assistant content, written to the standard step log file with timestamps.
+On failure, the HTTP status and error detail are written to the `.error`
+file and logged via tracing.
 
 ### Template placeholders
 
@@ -145,6 +196,7 @@ export GITHUB_TOKEN=***
 | Variable | Default | Purpose |
 |---|---|---|
 | `GITHUB_TOKEN` | — | GitHub API auth (required) |
+| `HERMES_API_KEY` | — | API key for `hermes_api` harness auth (required when using `hermes_api`) |
 | `RUST_LOG` | `info` | Log level passed to `tracing-subscriber` |
 
 The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output

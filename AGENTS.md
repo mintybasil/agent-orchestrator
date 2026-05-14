@@ -35,6 +35,7 @@ src/
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
+  hermes_api.rs -- Harness impl for the Hermes Agent REST API; POST /v1/chat/completions with Bearer auth
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
@@ -133,12 +134,54 @@ from the hermes harness.
 
 Currently supported:
 - `hermes` — invokes the hermes CLI agent
+- `hermes_api` — invokes the Hermes Agent via its REST API (`/v1/chat/completions`)
 
 Adding a new harness:
 1. Add a variant to `HarnessConfig` in `src/harness.rs` (with its specific fields)
 2. Add a struct implementing `Harness`
 3. Add a match arm in `HarnessConfig::build()`
 4. (Optional) Add a startup validation in `main.rs`
+
+#### Hermes API harness (`hermes_api`)
+
+The `hermes_api` harness sends prompts to a Hermes Agent REST API endpoint
+over HTTP using the OpenAI-compatible chat completions format. It avoids
+spawning a subprocess and works with remote or containerised agent servers.
+
+Configuration fields (`harness = { type = "hermes_api", ... }`):
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | Chat completions endpoint (e.g. `http://localhost:8080/v1/chat/completions`) |
+| `provider` | string | no | Provider hint included in the system message |
+| `model` | string | no | Model override sent in the request body |
+| `max_turns` | integer | no | Sent as `max_tokens` in the request body |
+
+Authentication uses a Bearer token read from the `HERMES_API_KEY` environment
+variable at runtime. The variable is checked on each invocation; if it is not
+set, the step fails immediately with a clear error message. The API key is
+never stored in the config file.
+
+The request body follows the OpenAI chat completions schema:
+
+```json
+{
+  "model": "<model or null>",
+  "messages": [
+    {"role": "system", "content": "You are a software engineering agent...\nYour working directory is: <workspace_path>"},
+    {"role": "user", "content": "<rendered prompt>"}
+  ],
+  "max_tokens": <max_turns or null>
+}
+```
+
+The system message automatically includes the workspace directory path so the
+remote agent knows where files are located. If a `provider` is specified, it is
+appended to the system message as a routing hint.
+
+On success, the full API response and extracted assistant content are written
+to the step log file (with timestamps). On failure, the HTTP status and error
+detail are written to the `.error` file.
 
 ### Hot-reload
 
@@ -347,6 +390,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
+# harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completions" }
 # harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3", max_turns = 10 }
 
 # Optional pre-hooks (run before the agent harness)
