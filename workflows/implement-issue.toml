@@ -25,7 +25,7 @@ allowed_users = ["mintybasil", "zeroklaw"]
 [[steps]]
 name = "Plan"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Use the writing-plans skill, and store the plan in {{output_path}}/plan.md."
-harness = { type = "hermes", profile = "pm" }
+harness = { type = "hermes_api", base_url = "http://localhost:8643" }
 
 [[steps.post_hooks]]
 type = "file_not_empty"
@@ -45,5 +45,5 @@ Please complete the following steps:
 6. Update the PR description if any changes are required.
 7. Convert the PR from a draft to a ready for review PR, and request a review from @mintybasil.
 """
-harness = { type = "hermes", profile = "swe" }
+harness = { type = "hermes_api", base_url = "http://localhost:8644" }
 

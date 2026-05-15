@@ -29,4 +29,4 @@ We need to address review {{review_id}} on PR {{pr_number}} in {{owner}}/{{repo}
 4. If you have sufficient context to address the review: implement and push changes, and respond with a comment. If you need feedback or additional context: add a comment to the PR requesting it.
 5. If you have pushed any changes, please ensure the PR description is updated accordingly, that the CI checks pass, and that there are no merge conflicts.
 """
-harness = { type = "hermes", profile = "swe" }
+harness = { type = "hermes_api", base_url = "http://localhost:8644" }
