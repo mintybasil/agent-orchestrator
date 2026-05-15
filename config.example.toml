@@ -1,1 +1,111 @@
-files['config.example.toml']
+# Place this file in a directory and point agent-orchestrator at it with --workflows:
+#   agent-orchestrator --workflows /path/to/directory --limit 4 --interval 60
+#
+# All .toml files in the directory are loaded as separate workflow configs.
+# --limit caps the number of concurrent workflow runs (0 = unlimited).
+# --interval sets the poll interval in seconds (default: 60).
+
+# ── Git configuration ─────────────────────────────────────────────────
+# Controls how the orchestrator manages the local repository clone and
+# optional per-event worktrees.
+#
+# clone = true (default): clone/pull the repo into <data-dir>/<owner>/<repo>/repo/
+# clone = false: skip git operations entirely (no repo checkout)
+# worktree = false (default): agent runs in the shared repo checkout
+# worktree = true: create a fresh git worktree per event, cleaned up after
+# default_branch = "main" (default): branch used for git pull and worktree creation
+#
+# NOTE: worktree = true requires clone = true (enforced on startup).
+
+[git]
+clone = true
+worktree = false
+default_branch = "main"
+
+# ── Triggers ──────────────────────────────────────────────────────────
+# What initiates a workflow run. Supported types:
+#   - github_issue_assigned: polls for issues assigned to a user
+#   - github_pr_review: polls for PR reviews/comments by allowed users
+#   - local_file: watches a local directory for files matching a glob pattern
+# Multiple triggers can be defined.
+
+[[triggers]]
+type = "github_issue_assigned"
+assigned_to = "your-github-username"
+allowed_users = ["your-github-username"]
+
+# [[triggers]]
+# type = "github_pr_review"
+# allowed_users = ["your-github-username"]
+
+# [[triggers]]
+# type = "local_file"
+# path = "/path/to/watch"
+# pattern = "*.md"   # optional glob filter (default: "*")
+
+# ── Repos ─────────────────────────────────────────────────────────────
+
+[[repos]]
+owner = "your-org"
+repo = "your-repo"
+
+# Alternative compact format:
+# repos = [
+#   { owner = "your-org", repo = "your-repo" },
+#   { owner = "your-org", repo = "your-repo2" }
+# ]
+
+# ── Workflow steps ────────────────────────────────────────────────────
+# Executed sequentially for each triggered event.
+# Global template placeholders:
+#   {{owner}}, {{repo}}, {{output_path}}, {{default_branch}},
+#   {{repo_path}} (path to the base repo clone; empty when git.clone = false)
+# Trigger-specific placeholders (merged at runtime):
+#   github_issue_assigned: {{issue_number}}
+#   github_pr_review: {{pr_number}}
+#   local_file: {{file_name}}, {{file_path}}
+
+[[steps]]
+name = "triage"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}."
+harness = { type = "hermes", profile = "cto" }
+# provider = "openai"   # optional: passes --provider to hermes
+# model = "o3"          # optional: passes --model to hermes
+# max_turns = 10        # optional: passes --max-turns to hermes
+
+[[steps]]
+name = "implement"
+prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary of what you did to {{output_path}}/step_01_implement.md."
+harness = { type = "hermes", profile = "cto" }
+
+# ── Alternative harness: hermes_api ──────────────────────────────────
+# Uses the Hermes Agent REST API instead of the CLI. This is useful when
+# the agent server is running remotely or you want to avoid subprocess
+# overhead.
+#
+# Required fields:
+#   base_url: The base URL of the Hermes API server (e.g. http://localhost:8080)
+# Authentication:
+#   Set the HERMES_API_KEY environment variable with your API key.
+#   The key is read from HERMES_API_KEY at runtime — never stored in config.
+#
+# The harness uses the Responses API (/v1/responses) endpoint, which supports
+# persistent conversation state and better multi-step agent execution. The
+# workspace path is sent in the "instructions" field (not a system message)
+# to avoid conflicting with the agent's own environment hints.
+#
+# [[steps]]
+# name = "triage-api"
+# prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
+# harness = { type = "hermes_api", base_url = "http://localhost:8080" }
+# # provider = "openai"   # optional: route to a specific provider on the API server
+# # model = "o3"          # optional: model override
+
+# ── Optional pre/post hooks ────────────────────────────────────────────
+# [[steps.pre_hooks]]
+# type = "file_not_empty"
+# path = "{{output_path}}/triage.md"
+
+# [[steps.post_hooks]]
+# type = "file_not_empty"
+# path = "{{output_path}}/triage.md"
