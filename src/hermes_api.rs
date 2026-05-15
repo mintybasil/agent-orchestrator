@@ -64,6 +64,7 @@ struct ResponsesRequest {
 #[derive(Deserialize)]
 struct OutputItem {
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     item_type: Option<String>,
     content: Option<Vec<ContentBlock>>,
 }
@@ -79,7 +80,9 @@ struct ContentBlock {
 /// Response body from the Responses API endpoint.
 #[derive(Deserialize)]
 struct ResponsesApiResponse {
+    #[allow(dead_code)]
     id: Option<String>,
+    #[allow(dead_code)]
     status: Option<String>,
     output: Option<Vec<OutputItem>>,
 }
@@ -258,14 +261,12 @@ async fn run_api_step(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let response_id = api_response.id.unwrap_or_default();
-
     // Write the full response to the log file.
     // First write the raw API response, then the extracted content.
     let mut log_content = String::new();
     log_content.push_str(&format!(
-        "=== API Response (HTTP {}, id={}) ===\n",
-        status, response_id
+        "=== API Response (HTTP {}) ===\n",
+        status
     ));
     log_content.push_str(&response_text);
     log_content.push_str("\n\n=== Assistant Content ===\n");
