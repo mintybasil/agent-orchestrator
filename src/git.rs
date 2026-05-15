@@ -12,8 +12,8 @@ use tracing::instrument;
 /// exists, pulls the latest changes from `origin <default_branch>`.
 ///
 /// Authentication is handled via `git2::RemoteCallbacks` that supply the token
-/// for HTTPS operations, mirroring the previous `GIT_ASKPASS` behavior.
-/// The token is never embedded in URLs or written to `.git/config`.
+/// for HTTPS operations. The token is never embedded in URLs or written to
+/// `.git/config`.
 ///
 /// Returns the path to the repo directory.
 pub fn ensure_repo(
@@ -22,7 +22,6 @@ pub fn ensure_repo(
     repo: &str,
     default_branch: &str,
     token: &str,
-    _current_exe: &Path,
 ) -> anyhow::Result<PathBuf> {
     let repo_path = data_root.join(owner).join(repo).join("repo");
 
@@ -37,9 +36,8 @@ pub fn ensure_repo(
 
 /// Build `git2::RemoteCallbacks` that authenticate using the provided token.
 ///
-/// This bridges the existing `AO_GIT_TOKEN` / `GIT_ASKPASS` credential flow
-/// to git2's callback system. For username prompts, returns `x-access-token`
-/// (matching the askpass handler). For password prompts, returns the token.
+/// For username prompts, returns `x-access-token`; for password prompts,
+/// returns the token.
 fn callbacks(token: &str) -> RemoteCallbacks<'_> {
     let mut cb = RemoteCallbacks::new();
     let token = token.to_string();
@@ -321,7 +319,6 @@ pub fn create_worktree(
     base: &str,
     branch: &str,
     token: &str,
-    _current_exe: &Path,
 ) -> anyhow::Result<String> {
     tracing::info!("Creating worktree...");
 
@@ -383,13 +380,10 @@ pub fn create_worktree(
 /// Remove a git worktree at the given path and delete its associated branch.
 ///
 /// Forces removal even if there are uncommitted changes.
-#[instrument(skip(_token))]
 pub fn remove_worktree(
     repo_path: &Path,
     path: &Path,
     branch: &str,
-    _token: &str,
-    _current_exe: &Path,
 ) -> anyhow::Result<()> {
     tracing::info!("Removing worktree...");
 
@@ -447,8 +441,6 @@ pub fn remove_worktree(
 /// Returns `Ok(true)` if there are uncommitted changes, `Ok(false)` if clean.
 pub fn has_uncommitted_changes(
     work_dir: &Path,
-    _token: &str,
-    _current_exe: &Path,
 ) -> anyhow::Result<bool> {
     let repo = Repository::open(work_dir)
         .context("failed to open repository to check for uncommitted changes")?;
@@ -563,12 +555,8 @@ mod tests {
             .expect("git commit");
     }
 
-    // Dummy token for tests — only needed for remote operations; local ops don't use it.
     fn fake_token() -> String {
         "fake-test-token".to_string()
-    }
-    fn fake_exe() -> PathBuf {
-        PathBuf::from("/usr/bin/true")
     }
 
     #[test]
@@ -603,7 +591,6 @@ mod tests {
             "main",
             branch,
             &fake_token(),
-            &fake_exe(),
         );
 
         assert!(
@@ -646,7 +633,6 @@ mod tests {
             "main",
             branch,
             &fake_token(),
-            &fake_exe(),
         );
 
         assert!(
@@ -680,7 +666,7 @@ mod tests {
         // Add an untracked file
         std::fs::write(tmp.path().join("new_file.txt"), "hello").unwrap();
 
-        assert!(has_uncommitted_changes(tmp.path(), &fake_token(), &fake_exe()).unwrap());
+        assert!(has_uncommitted_changes(tmp.path()).unwrap());
     }
 
     #[test]
@@ -688,7 +674,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         make_repo_with_commit(tmp.path(), "main");
 
-        assert!(!has_uncommitted_changes(tmp.path(), &fake_token(), &fake_exe()).unwrap());
+        assert!(!has_uncommitted_changes(tmp.path()).unwrap());
     }
 
     #[test]
@@ -699,6 +685,6 @@ mod tests {
         // Modify tracked file
         std::fs::write(tmp.path().join("README.md"), "# modified").unwrap();
 
-        assert!(has_uncommitted_changes(tmp.path(), &fake_token(), &fake_exe()).unwrap());
+        assert!(has_uncommitted_changes(tmp.path()).unwrap());
     }
 }

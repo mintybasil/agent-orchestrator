@@ -39,7 +39,6 @@ pub struct Dispatcher {
     semaphore: Arc<Semaphore>,
     data_root: PathBuf,
     token: String,
-    current_exe: PathBuf,
     show_logs: bool,
 }
 
@@ -47,7 +46,6 @@ impl Dispatcher {
     pub fn new(
         data_root: PathBuf,
         token: String,
-        current_exe: PathBuf,
         show_logs: bool,
         concurrency_limit: usize,
         completed: Arc<Mutex<HashSet<String>>>,
@@ -66,7 +64,6 @@ impl Dispatcher {
             semaphore,
             data_root,
             token,
-            current_exe,
             show_logs,
         }
     }
@@ -126,7 +123,6 @@ impl Dispatcher {
             let semaphore = Arc::clone(&self.semaphore);
             let data_root = self.data_root.clone();
             let token = self.token.clone();
-            let current_exe = self.current_exe.clone();
             let show_logs = self.show_logs;
 
             let event_key = msg.event_key;
@@ -143,7 +139,6 @@ impl Dispatcher {
                     &data_root,
                     &steps,
                     &token,
-                    &current_exe,
                     show_logs,
                     &git_config,
                 )
@@ -261,7 +256,6 @@ mod tests {
         let dispatcher = Dispatcher::new(
             PathBuf::from("/tmp/test"),
             "token".to_string(),
-            PathBuf::from("/usr/local/bin/gost"),
             false,
             0,
             Arc::new(Mutex::new(HashSet::new())),
@@ -275,7 +269,6 @@ mod tests {
         let dispatcher = Dispatcher::new(
             PathBuf::from("/tmp/test"),
             "token".to_string(),
-            PathBuf::from("/usr/local/bin/gost"),
             false,
             0,
             completed,
@@ -351,7 +344,6 @@ mod tests {
         let d0 = Dispatcher::new(
             PathBuf::from("/tmp"),
             "t".into(),
-            PathBuf::from("/bin"),
             false,
             0,
             Arc::new(Mutex::new(HashSet::new())),
@@ -363,7 +355,6 @@ mod tests {
         let d4 = Dispatcher::new(
             PathBuf::from("/tmp"),
             "t".into(),
-            PathBuf::from("/bin"),
             false,
             4,
             Arc::new(Mutex::new(HashSet::new())),

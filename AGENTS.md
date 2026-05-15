@@ -28,8 +28,7 @@ cargo check
 
 ```
 src/
-  main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
-  askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
+  main.rs       -- Entry point: startup validation, tracing init, poll loop
   config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
   git.rs        -- Git repo/worktree management via git2-rs: clone/pull, worktree create/remove, token auth via RemoteCallbacks
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
@@ -212,10 +211,6 @@ subsequent callbacks reuse the same credential object automatically.
 The `scrub_credentials` function is retained for defense-in-depth: it strips
 token-like strings from any output text, though credentials are no longer passed
 through shell command arguments or visible in process listings.
-
-The `askpass.rs` module and `GIT_ASKPASS`/`AO_ASKPASS_MODE` mechanism are still
-present in the binary for compatibility but are no longer used by the core git
-operations in `git.rs`.
 
 ## Additional architecture notes
 
