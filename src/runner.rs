@@ -89,13 +89,7 @@ pub async fn run_workflow(
         );
         let wt_name = format!("worktree-{}", key.number);
         let wt_path = workspace_dir.join(&wt_name);
-        git::create_worktree(
-            repo,
-            &wt_path,
-            &git_config.default_branch,
-            &branch,
-            token,
-        )?;
+        git::create_worktree(repo, &wt_path, &git_config.default_branch, &branch, token)?;
         Some((wt_path, branch))
     } else {
         None
@@ -250,11 +244,7 @@ async fn run_step(step: &Step, ctx: &StepContext, vars: &HashMap<String, String>
 /// Note: pushing unpushed commits was previously attempted here, but removed
 /// because the worktree branch name (`ao/<event-label>-<timestamp>`) differs
 /// from whatever branch the agent pushes to, making push detection unreliable.
-fn cleanup_worktree(
-    repo_path: &Path,
-    worktree_path: &Path,
-    branch: &str,
-) -> Result<()> {
+fn cleanup_worktree(repo_path: &Path, worktree_path: &Path, branch: &str) -> Result<()> {
     // Check for uncommitted changes.
     if git::has_uncommitted_changes(worktree_path)? {
         anyhow::bail!(

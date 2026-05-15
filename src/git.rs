@@ -380,11 +380,7 @@ pub fn create_worktree(
 /// Remove a git worktree at the given path and delete its associated branch.
 ///
 /// Forces removal even if there are uncommitted changes.
-pub fn remove_worktree(
-    repo_path: &Path,
-    path: &Path,
-    branch: &str,
-) -> anyhow::Result<()> {
+pub fn remove_worktree(repo_path: &Path, path: &Path, branch: &str) -> anyhow::Result<()> {
     tracing::info!("Removing worktree...");
 
     let repo =
@@ -439,9 +435,7 @@ pub fn remove_worktree(
 /// Check for uncommitted changes in the given directory.
 ///
 /// Returns `Ok(true)` if there are uncommitted changes, `Ok(false)` if clean.
-pub fn has_uncommitted_changes(
-    work_dir: &Path,
-) -> anyhow::Result<bool> {
+pub fn has_uncommitted_changes(work_dir: &Path) -> anyhow::Result<bool> {
     let repo = Repository::open(work_dir)
         .context("failed to open repository to check for uncommitted changes")?;
 
@@ -585,13 +579,7 @@ mod tests {
         let wt_path = tmp.path().join("worktree-1");
         let branch = "ao/test-worktree-1";
 
-        let result = create_worktree(
-            tmp.path(),
-            &wt_path,
-            "main",
-            branch,
-            &fake_token(),
-        );
+        let result = create_worktree(tmp.path(), &wt_path, "main", branch, &fake_token());
 
         assert!(
             result.is_ok(),
@@ -627,13 +615,7 @@ mod tests {
         let wt_path = tmp.path().join("worktree-1");
         let branch = "ao/test-worktree-2";
 
-        let result = create_worktree(
-            tmp.path(),
-            &wt_path,
-            "main",
-            branch,
-            &fake_token(),
-        );
+        let result = create_worktree(tmp.path(), &wt_path, "main", branch, &fake_token());
 
         assert!(
             result.is_ok(),
