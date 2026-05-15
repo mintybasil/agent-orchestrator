@@ -344,6 +344,63 @@ struct PullRequest {
     number: u64,
 }
 
+
+/// An issue where a specific user was @mentioned.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MentionedIssue {
+    pub number: u64,
+}
+
+/// List open issues in a repository where `mentioned_user` is @mentioned.
+///
+/// Uses the GitHub Search API with the query:
+///   `mentions:USERNAME is:issue is:open repo:OWNER/REPO`
+///
+/// This finds issues where the user appears in the body, comments, or
+/// was explicitly @mentioned, regardless of assignment status.
+pub async fn list_mentioned_issues(
+    client: &GitHubClient,
+    owner: &str,
+    repo: &str,
+    mentioned_user: &str,
+) -> Result<Vec<MentionedIssue>> {
+    let mut all_issues: Vec<MentionedIssue> = Vec::new();
+    let mut page: u32 = 1;
+
+    loop {
+        // GitHub Search API: q parameter encodes the query, per_page/page for pagination
+        let url = format!(
+            "https://api.github.com/search/issues?q=mentions%3A{mentioned_user}+is%3Aissue+is%3Aopen+repo%3A{owner}%2F{repo}&per_page=100&page={page}"
+        );
+        let resp = client.send_request(client.client.get(&url)).await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("{}", format_github_error(status, &body));
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct SearchResponse {
+            items: Vec<MentionedIssue>,
+        }
+
+        let search: SearchResponse = resp
+            .json()
+            .await
+            .context("deserializing GitHub search issues response")?;
+
+        if search.items.is_empty() {
+            break;
+        }
+
+        all_issues.extend(search.items);
+        page += 1;
+    }
+
+    Ok(all_issues)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

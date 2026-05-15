@@ -76,6 +76,7 @@ trait and are specified in config via `[[triggers]]` tables.
 Currently supported:
 - `github_issue_assigned` — polls GitHub for issues assigned to a user
 - `github_pr_review` — polls GitHub for PR reviews/comments by allowed users
+- `github_issue_mention` — polls GitHub for issues where a user is @mentioned
 - `local_file` — watches a local directory for files matching a glob pattern
 
 Each trigger implementation owns its own credentials (injected at construction

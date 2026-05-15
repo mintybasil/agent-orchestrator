@@ -1,0 +1,26 @@
+repos = [
+    {owner = "your-org", repo = "your-repo"},
+]
+
+[git]
+clone = true
+worktree = true
+default_branch = "main"
+
+[[triggers]]
+type = "github_issue_mention"
+mentioned_user = "your-github-username"
+
+# Workflow steps executed sequentially for each mentioned issue.
+# Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{mentioned_user}}, {{output_path}}, {{default_branch}}, {{repo_path}}
+
+[[steps]]
+name = "Review and Respond"
+prompt_template = """
+You have been @mentioned in issue #{{issue_number}} in {{owner}}/{{repo}}.
+
+1. Review the entire issue thread to understand the context and identify where you are tagged and what is being asked of you.
+2. **Always** respond with a comment on the issue addressing what was asked of you.
+3. If a code change is requested, optionally open a PR to address it.
+"""
+harness = { type = "hermes_api", profile = "swe" }
