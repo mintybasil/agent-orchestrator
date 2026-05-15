@@ -28,10 +28,9 @@ cargo check
 
 ```
 src/
-  main.rs       -- Entry point: askpass dispatch, startup validation, tracing init, poll loop
-  askpass.rs    -- ASKPASS handler: responds to git credential prompts via re-invocation
+  main.rs       -- Entry point: startup validation, tracing init, poll loop
   config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
-  git.rs        -- Git repo/worktree management: clone/pull, worktree create/remove, ASKPASS auth
+  git.rs        -- Git repo/worktree management via git2-rs: clone/pull, worktree create/remove, token auth via RemoteCallbacks
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
@@ -239,30 +238,24 @@ For local file triggers, `workspace_id` is derived from the file stem (e.g.
 `plan` for a file named `plan.md`).
 
 Before each workflow run, the orchestrator ensures the repo exists:
-- **First run**: `git clone` into the `repo/` directory using `GIT_ASKPASS` for authentication
-- **Subsequent runs**: `git pull origin <default_branch>` to update to latest (also via `GIT_ASKPASS`)
+- **First run**: `git2::Repository::clone` into the `repo/` directory with token auth via `RemoteCallbacks`
+- **Subsequent runs**: `git2` fetch + merge on the default branch to update to latest (also via `RemoteCallbacks`)
 
-### Git authentication (GIT_ASKPASS)
+### Git authentication (git2 RemoteCallbacks)
 
-The binary acts as its own credential helper. When it spawns `git clone` or `git pull`,
-it sets three environment variables on the child process:
+All git operations in `git.rs` use the `git2` Rust crate directly, authenticating
+via `RemoteCallbacks` credential callbacks. The `AO_GIT_TOKEN` environment variable
+provides the personal access token. On the first credential callback, the token
+is packaged into a `git2::Cred::userpass_plaintext` with username `x-access-token`;
+subsequent callbacks reuse the same credential object automatically.
 
 | Env var | Value | Purpose |
 |---|---|---|
-| `GIT_ASKPASS` | Path to the running binary (`current_exe`) | Tells git to re-invoke the binary for credential prompts |
-| `AO_ASKPASS_MODE` | `1` | Sentinel: puts the re-invocation into askpass mode |
-| `AO_GIT_TOKEN` | The `GITHUB_TOKEN` value | The token to return as the password |
-| `GIT_TERMINAL_PROMPT` | `0` | Prevents interactive auth fallback |
+| `AO_GIT_TOKEN` | The `GITHUB_TOKEN` value | Token used by git2 credential callbacks for remote auth |
 
-When git needs credentials, it re-invokes the binary. `main()` checks for
-`AO_ASKPASS_MODE` first — if set, it runs the askpass handler (which prints
-either `x-access-token` for username prompts or the token for password prompts)
-and exits immediately, bypassing all normal startup.
-
-**Why this approach**: The token is never embedded in URLs, never written to
-`.git/config`, never appears in process arguments, and never leaks outside the
-process's env block. The ASKPASS round-trip is scoped to the git child process
-only.
+The `scrub_credentials` function is retained for defense-in-depth: it strips
+token-like strings from any output text, though credentials are no longer passed
+through shell command arguments or visible in process listings.
 
 ## Additional architecture notes
 
