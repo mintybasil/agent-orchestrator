@@ -125,8 +125,10 @@ Harnesses define **which agent backend runs a step**. They implement the
 
 Each `HarnessConfig` variant carries **harness-specific options** — the Step
 struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
-`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI flags, not
-generic step concerns.
+`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI
+flags, not generic step concerns. The `hermes_api` variant carries `base_url`,
+`provider`, and `model` — but not `max_turns`, since the `/v1/chat/completions`
+endpoint does not expose a turn-limit parameter.
 
 **Note**: Worktree management is handled by the orchestrator (via `[git]`
 config), not by individual harness steps. The `--worktree` flag has been removed
@@ -155,7 +157,6 @@ Configuration fields (`harness = { type = "hermes_api", ... }`):
 | `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080`) |
 | `provider` | string | no | Provider hint included in the system message |
 | `model` | string | no | Model override sent in the request body |
-| `max_turns` | integer | no | Sent as `max_tokens` in the request body |
 
 Authentication uses a Bearer token read from the `HERMES_API_KEY` environment
 variable at runtime. The variable is checked on each invocation; if it is not
@@ -170,8 +171,7 @@ The request body follows the OpenAI chat completions schema:
   "messages": [
     {"role": "system", "content": "Your working directory is: <workspace_path>"},
     {"role": "user", "content": "<rendered prompt>"}
-  ],
-  "max_tokens": <max_turns or null>
+  ]
 }
 ```
 

@@ -95,7 +95,6 @@ harness = { type = "hermes", profile = "cto" }
 # harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 # # provider = "openai"   # optional: route to a specific provider on the API server
 # # model = "o3"          # optional: model override
-# # max_turns = 10        # optional: max tokens/turns
 
 # ── Optional pre/post hooks ────────────────────────────────────────────
 # [[steps.pre_hooks]]

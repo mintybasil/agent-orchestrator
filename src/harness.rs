@@ -61,9 +61,6 @@ pub enum HarnessConfig {
         /// Optional model override.
         #[serde(default)]
         model: Option<String>,
-        /// Optional max turns.
-        #[serde(default)]
-        max_turns: Option<u32>,
     },
 }
 
@@ -109,12 +106,10 @@ impl HarnessConfig {
                 base_url,
                 provider,
                 model,
-                max_turns,
             } => Box::new(crate::hermes_api::HermesApiHarness {
                 base_url: base_url.clone(),
                 provider: provider.clone(),
                 model: model.clone(),
-                max_turns: *max_turns,
             }),
         }
     }
@@ -217,7 +212,6 @@ type = "hermes_api"
 base_url = "http://localhost:8000"
 provider = "openai"
 model = "o3"
-max_turns = 10
 "#;
         let config: HarnessConfig = toml::from_str(toml).unwrap();
         match config {
@@ -225,12 +219,10 @@ max_turns = 10
                 base_url,
                 provider,
                 model,
-                max_turns,
             } => {
                 assert_eq!(base_url, "http://localhost:8000");
                 assert_eq!(provider, Some("openai".to_string()));
                 assert_eq!(model, Some("o3".to_string()));
-                assert_eq!(max_turns, Some(10));
             }
             other => panic!("expected HermesApi, got {:?}", other),
         }
@@ -248,12 +240,10 @@ base_url = "https://api.example.com"
                 base_url,
                 provider,
                 model,
-                max_turns,
             } => {
                 assert_eq!(base_url, "https://api.example.com");
                 assert!(provider.is_none());
                 assert!(model.is_none());
-                assert!(max_turns.is_none());
             }
             other => panic!("expected HermesApi, got {:?}", other),
         }
@@ -284,7 +274,6 @@ profile = "cto"
             base_url: "http://localhost:8000".to_string(),
             provider: None,
             model: None,
-            max_turns: None,
         };
         let harness = config.build();
         assert_eq!(harness.name(), "hermes_api");

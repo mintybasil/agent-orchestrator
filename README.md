@@ -71,7 +71,7 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model`; or `type = "hermes_api"` with `base_url`, optional `provider`, `model`, and `max_turns` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider`, `model`, and `max_turns`; or `type = "hermes_api"` with `base_url`, optional `provider` and `model` |
 
 ### Hermes invocation
 
@@ -98,7 +98,6 @@ prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Wr
 harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 # provider = "openai"   # optional
 # model = "o3"          # optional
-# max_turns = 10        # optional
 ```
 
 | Field | Type | Required | Description |
@@ -106,7 +105,6 @@ harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 | `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080`) |
 | `provider` | string | no | Provider hint included in the system message |
 | `model` | string | no | Model override sent in the request body |
-| `max_turns` | integer | no | Sent as `max_tokens` in the request body |
 
 Authentication uses a Bearer token read from the `HERMES_API_KEY` environment
 variable at runtime (never stored in config). If the variable is not set, the
@@ -116,7 +114,7 @@ The API request follows the OpenAI chat completions format:
 
 ```json
 POST /v1/chat/completions
-Authorization: Bearer <HERMES_API_KEY>
+Authorization: Bearer ***
 Content-Type: application/json
 
 {
@@ -124,8 +122,7 @@ Content-Type: application/json
   "messages": [
     {"role": "system", "content": "Your working directory is: <workspace_path>"},
     {"role": "user", "content": "<rendered prompt>"}
-  ],
-  "max_tokens": <max_turns or null>
+  ]
 }
 ```
 

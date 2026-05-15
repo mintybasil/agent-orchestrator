@@ -23,7 +23,6 @@ pub struct HermesApiHarness {
     pub base_url: String,
     pub provider: Option<String>,
     pub model: Option<String>,
-    pub max_turns: Option<u32>,
 }
 
 /// Build the full API URL from a base URL.
@@ -53,7 +52,6 @@ fn endpoint_url(base_url: &str) -> Result<String> {
 struct ChatRequest {
     model: Option<String>,
     messages: Vec<ChatMessage>,
-    max_tokens: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -113,7 +111,6 @@ impl Harness for HermesApiHarness {
         };
         let provider = self.provider.clone();
         let model = self.model.clone();
-        let max_turns = self.max_turns;
         let workspace_dir = workspace_dir.to_path_buf();
         let prompt = rendered_prompt.to_string();
         let step_name = step.name.clone();
@@ -127,7 +124,6 @@ impl Harness for HermesApiHarness {
                 &url,
                 provider.as_deref(),
                 model.as_deref(),
-                max_turns,
                 &workspace_dir,
                 &prompt,
                 &step_name,
@@ -146,7 +142,6 @@ async fn run_api_step(
     url: &str,
     provider: Option<&str>,
     model: Option<&str>,
-    max_turns: Option<u32>,
     workspace_dir: &Path,
     prompt: &str,
     step_name: &str,
@@ -198,7 +193,6 @@ async fn run_api_step(
     let request_body = ChatRequest {
         model: model.map(|m| m.to_string()),
         messages,
-        max_tokens: max_turns,
     };
 
     let client = reqwest::Client::new();
@@ -331,11 +325,9 @@ mod tests {
                     content: "Hello!".to_string(),
                 },
             ],
-            max_tokens: Some(100),
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"model\":\"gpt-4o\""));
-        assert!(json.contains("\"max_tokens\":100"));
         assert!(json.contains("\"role\":\"system\""));
         assert!(json.contains("\"role\":\"user\""));
     }
@@ -348,11 +340,9 @@ mod tests {
                 role: "user".to_string(),
                 content: "Hello!".to_string(),
             }],
-            max_tokens: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"model\":null"));
-        assert!(json.contains("\"max_tokens\":null"));
     }
 
     #[test]
@@ -432,7 +422,6 @@ mod tests {
             base_url: "http://localhost:8000".to_string(),
             provider: None,
             model: None,
-            max_turns: None,
         };
         assert_eq!(harness.name(), "hermes_api");
     }
