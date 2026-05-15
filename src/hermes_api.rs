@@ -264,10 +264,7 @@ async fn run_api_step(
     // Write the full response to the log file.
     // First write the raw API response, then the extracted content.
     let mut log_content = String::new();
-    log_content.push_str(&format!(
-        "=== API Response (HTTP {}) ===\n",
-        status
-    ));
+    log_content.push_str(&format!("=== API Response (HTTP {}) ===\n", status));
     log_content.push_str(&response_text);
     log_content.push_str("\n\n=== Assistant Content ===\n");
     log_content.push_str(&assistant_content);
@@ -443,10 +440,10 @@ mod tests {
         let workspace = Path::new("/tmp/repo");
         let provider = "openai";
         let instructions = format!(
-            "All work is in: {}. Always run `cd {}` as your first action before any file or terminal operations. Reference all file paths relative to this directory.{}",
+            "All work is in: {}. Always run `cd {}` as your first action before any file or terminal operations. Reference all file paths relative to this directory.\nProvider: {}",
             workspace.display(),
             workspace.display(),
-            format!("\nProvider: {}", provider)
+            provider
         );
         assert!(instructions.contains("Provider: openai"));
     }
