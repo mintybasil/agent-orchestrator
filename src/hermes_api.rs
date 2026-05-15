@@ -168,9 +168,7 @@ async fn run_api_step(
 
     // Build system message that tells the remote agent where its workspace is.
     let system_content = format!(
-        "You are a software engineering agent running via the Hermes API.\n\
-         Your working directory (worktree) is located at: {}\n\
-         All file paths should be relative to this directory.",
+        "Your working directory is: {}",
         workspace_dir.display()
     );
 
@@ -408,9 +406,7 @@ mod tests {
     fn system_content_includes_workspace_path() {
         let workspace = Path::new("/tmp/data/owner/repo/42");
         let system_content = format!(
-            "You are a software engineering agent running via the Hermes API.\n\
-             Your working directory (worktree) is located at: {}\n\
-             All file paths should be relative to this directory.",
+            "Your working directory is: {}",
             workspace.display()
         );
         assert!(system_content.contains("/tmp/data/owner/repo/42"));
