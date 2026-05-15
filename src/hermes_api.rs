@@ -1,12 +1,14 @@
 //! Harness implementation for the Hermes Agent REST API.
 //!
-//! Sends a POST request to the chat completions endpoint using the
+//! Sends a POST request to the Responses API endpoint using the
 //! OpenAI-compatible format. Authentication uses a Bearer token from the
 //! `HERMES_API_KEY` environment variable.
 //!
-//! Since the API-driven agent does not run on the local filesystem, the
-//! worktree/workspace path is injected into the prompt as a system-level
-//! instruction so the agent knows where to find files.
+//! Uses the `/v1/responses` endpoint (not `/v1/chat/completions`) because
+//! the Responses API supports persistent conversation state via
+//! `previous_response_id` and exposes tool call outputs in the response.
+//! The workspace path is injected via the `instructions` field rather than
+//! a system message, following the Responses API schema.
 
 use crate::harness::{Harness, LogConfig};
 use crate::workflow::Step;
@@ -15,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Full endpoint path appended to the user-provided base URL.
-const API_PATH: &str = "/v1/chat/completions";
+const API_PATH: &str = "/v1/responses";
 
 /// Harness that invokes the Hermes Agent via its REST API.
 pub struct HermesApiHarness {
@@ -43,37 +45,43 @@ fn endpoint_url(base_url: &str) -> Result<String> {
     Ok(format!("{}{}", trimmed, API_PATH))
 }
 
-/// Request body for the `/v1/chat/completions` endpoint.
+/// Request body for the `/v1/responses` endpoint.
 ///
-/// Follows the OpenAI chat completions format with two messages:
-/// a system message containing the workspace context, and a user message
-/// with the rendered prompt.
+/// Uses the Responses API format where `instructions` provides persistent
+/// system-level guidance (workspace path, provider hint) and `input`
+/// carries the rendered prompt for this step.
 #[derive(Serialize)]
-struct ChatRequest {
+struct ResponsesRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
-    messages: Vec<ChatMessage>,
+    instructions: String,
+    input: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    store: Option<bool>,
 }
 
-#[derive(Serialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-/// Response body from the chat completions endpoint.
+/// An output item from the Responses API.
 #[derive(Deserialize)]
-struct ChatResponse {
-    choices: Vec<Choice>,
+struct OutputItem {
+    #[serde(rename = "type")]
+    item_type: Option<String>,
+    content: Option<Vec<ContentBlock>>,
 }
 
+/// A content block within an output item.
 #[derive(Deserialize)]
-struct Choice {
-    message: Option<ResponseMessage>,
+struct ContentBlock {
+    #[serde(rename = "type")]
+    content_type: Option<String>,
+    text: Option<String>,
 }
 
+/// Response body from the Responses API endpoint.
 #[derive(Deserialize)]
-struct ResponseMessage {
-    content: Option<String>,
+struct ResponsesApiResponse {
+    id: Option<String>,
+    status: Option<String>,
+    output: Option<Vec<OutputItem>>,
 }
 
 /// A minimal error response shape — we only care about the detail field
@@ -166,28 +174,22 @@ async fn run_api_step(
         );
     }
 
-    // Build system message that tells the remote agent where its workspace is.
-    let system_content = format!("Your working directory is: {}", workspace_dir.display());
+    // Build instructions that tell the remote agent where its workspace is.
+    // Using "cd <path>" rather than just asserting the directory avoids
+    // conflicting with the agent's own environment hints (see the
+    // api-server-workdir-pitfall doc for details).
+    let instructions = format!(
+        "All work is in: {}. Always run `cd {}` as your first action before any file or terminal operations. Reference all file paths relative to this directory.{}",
+        workspace_dir.display(),
+        workspace_dir.display(),
+        provider.map_or_else(String::new, |p| format!("\nProvider: {}", p))
+    );
 
-    let mut messages = vec![ChatMessage {
-        role: "system".to_string(),
-        content: system_content,
-    }];
-
-    // If a provider is specified, add it as a system-level hint.
-    // The Hermes API may use this to route to the correct model.
-    if let Some(p) = provider {
-        messages[0].content = format!("{}\nProvider: {}", messages[0].content, p);
-    }
-
-    messages.push(ChatMessage {
-        role: "user".to_string(),
-        content: prompt.to_string(),
-    });
-
-    let request_body = ChatRequest {
+    let request_body = ResponsesRequest {
         model: model.map(|m| m.to_string()),
-        messages,
+        instructions,
+        input: prompt.to_string(),
+        store: Some(true),
     };
 
     let client = reqwest::Client::new();
@@ -229,26 +231,42 @@ async fn run_api_step(
     }
 
     // Parse the successful response.
-    let chat_response: ChatResponse = serde_json::from_str(&response_text).map_err(|e| {
+    let api_response: ResponsesApiResponse = serde_json::from_str(&response_text).map_err(|e| {
         anyhow::anyhow!(
-            "failed to parse hermes_api response as ChatResponse: {}. Raw body (first 500 chars): {}",
+            "failed to parse hermes_api response as ResponsesApiResponse: {}. Raw body (first 500 chars): {}",
             e,
             &response_text[..response_text.len().min(500)]
         )
     })?;
 
-    let assistant_content = chat_response
-        .choices
-        .first()
-        .and_then(|c| c.message.as_ref())
-        .and_then(|m| m.content.as_ref())
-        .cloned()
-        .unwrap_or_default();
+    // Extract assistant text from the output items.
+    // The Responses API returns a list of output items; we concatenate
+    // all text content blocks into a single string for the log.
+    let assistant_content = api_response
+        .output
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|item| item.content.as_ref())
+        .flatten()
+        .filter_map(|block| {
+            if block.content_type.as_deref() == Some("output_text") {
+                block.text.clone()
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let response_id = api_response.id.unwrap_or_default();
 
     // Write the full response to the log file.
     // First write the raw API response, then the extracted content.
     let mut log_content = String::new();
-    log_content.push_str(&format!("=== API Response (HTTP {}) ===\n", status));
+    log_content.push_str(&format!(
+        "=== API Response (HTTP {}, id={}) ===\n",
+        status, response_id
+    ));
     log_content.push_str(&response_text);
     log_content.push_str("\n\n=== Assistant Content ===\n");
     log_content.push_str(&assistant_content);
@@ -277,7 +295,7 @@ mod tests {
     fn endpoint_url_appends_path() {
         assert_eq!(
             endpoint_url("http://localhost:8000").unwrap(),
-            "http://localhost:8000/v1/chat/completions"
+            "http://localhost:8000/v1/responses"
         );
     }
 
@@ -285,7 +303,7 @@ mod tests {
     fn endpoint_url_strips_trailing_slash() {
         assert_eq!(
             endpoint_url("http://localhost:8000/").unwrap(),
-            "http://localhost:8000/v1/chat/completions"
+            "http://localhost:8000/v1/responses"
         );
     }
 
@@ -307,83 +325,91 @@ mod tests {
     }
 
     #[test]
-    fn chat_request_serializes_with_all_fields() {
-        let request = ChatRequest {
+    fn responses_request_serializes_with_all_fields() {
+        let request = ResponsesRequest {
             model: Some("gpt-4o".to_string()),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: "You are an assistant.".to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: "Hello!".to_string(),
-                },
-            ],
+            instructions: "All work is in: /tmp/repo. Always run `cd /tmp/repo` first.".to_string(),
+            input: "Hello!".to_string(),
+            store: Some(true),
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"model\":\"gpt-4o\""));
-        assert!(json.contains("\"role\":\"system\""));
-        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"instructions\""));
+        assert!(json.contains("\"input\":\"Hello!\""));
+        assert!(json.contains("\"store\":true"));
     }
 
     #[test]
-    fn chat_request_serializes_with_null_model() {
-        let request = ChatRequest {
+    fn responses_request_serializes_with_null_model() {
+        let request = ResponsesRequest {
             model: None,
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: "Hello!".to_string(),
-            }],
+            instructions: "Be helpful.".to_string(),
+            input: "Hello!".to_string(),
+            store: None,
         };
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":null"));
+        // skip_serializing_if should omit both model and store
+        assert!(!json.contains("\"model\""));
+        assert!(!json.contains("\"store\""));
     }
 
     #[test]
-    fn chat_response_deserializes() {
+    fn responses_api_output_extraction() {
         let json = r#"{
-            "choices": [
+            "id": "resp_abc123",
+            "status": "completed",
+            "output": [
                 {
-                    "message": {
-                        "role": "assistant",
-                        "content": "Hello! How can I help?"
-                    }
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": "Hello! How can I help?"}
+                    ]
                 }
             ]
         }"#;
-        let response: ChatResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(response.choices.len(), 1);
-        let content = response.choices[0]
-            .message
-            .as_ref()
-            .unwrap()
-            .content
-            .as_ref()
-            .unwrap();
+        let response: ResponsesApiResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.id.as_deref(), Some("resp_abc123"));
+        let content: String = response
+            .output
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| item.content.as_ref())
+            .flatten()
+            .filter_map(|block| {
+                if block.content_type.as_deref() == Some("output_text") {
+                    block.text.clone()
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert_eq!(content, "Hello! How can I help?");
     }
 
     #[test]
-    fn chat_response_handles_empty_content() {
+    fn responses_api_handles_empty_output() {
         let json = r#"{
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": null
-                    }
-                }
-            ]
+            "id": "resp_empty",
+            "status": "completed",
+            "output": []
         }"#;
-        let response: ChatResponse = serde_json::from_str(json).unwrap();
-        let content = response
-            .choices
-            .first()
-            .and_then(|c| c.message.as_ref())
-            .and_then(|m| m.content.as_ref())
-            .cloned()
-            .unwrap_or_default();
+        let response: ResponsesApiResponse = serde_json::from_str(json).unwrap();
+        let content: String = response
+            .output
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| item.content.as_ref())
+            .flatten()
+            .filter_map(|block| {
+                if block.content_type.as_deref() == Some("output_text") {
+                    block.text.clone()
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(content.is_empty());
     }
 
@@ -400,10 +426,28 @@ mod tests {
     }
 
     #[test]
-    fn system_content_includes_workspace_path() {
+    fn instructions_includes_workspace_path() {
         let workspace = Path::new("/tmp/data/owner/repo/42");
-        let system_content = format!("Your working directory is: {}", workspace.display());
-        assert!(system_content.contains("/tmp/data/owner/repo/42"));
+        let instructions = format!(
+            "All work is in: {}. Always run `cd {}` as your first action before any file or terminal operations. Reference all file paths relative to this directory.",
+            workspace.display(),
+            workspace.display()
+        );
+        assert!(instructions.contains("/tmp/data/owner/repo/42"));
+        assert!(instructions.contains("cd /tmp/data/owner/repo/42"));
+    }
+
+    #[test]
+    fn instructions_with_provider() {
+        let workspace = Path::new("/tmp/repo");
+        let provider = "openai";
+        let instructions = format!(
+            "All work is in: {}. Always run `cd {}` as your first action before any file or terminal operations. Reference all file paths relative to this directory.{}",
+            workspace.display(),
+            workspace.display(),
+            format!("\nProvider: {}", provider)
+        );
+        assert!(instructions.contains("Provider: openai"));
     }
 
     #[test]
