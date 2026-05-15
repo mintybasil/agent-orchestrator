@@ -52,7 +52,7 @@ repo  = "your-repo"
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completions" }
+# harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
 
 [[steps]]
 name = "implement"
@@ -71,7 +71,7 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model`; or `type = "hermes_api"` with `url`, optional `provider`, `model`, and `max_turns` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model`; or `type = "hermes_api"` with `base_url`, optional `provider`, `model`, and `max_turns` |
 
 ### Hermes invocation
 
@@ -95,7 +95,7 @@ subprocess and works with remote or containerised agent servers.
 [[steps]]
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
-harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completions" }
+harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
 # provider = "openai"   # optional
 # model = "o3"          # optional
 # max_turns = 10        # optional
@@ -103,7 +103,7 @@ harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completion
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `url` | string | yes | Chat completions endpoint URL |
+| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080/v1`); the `/chat/completions` path is appended automatically |
 | `provider` | string | no | Provider hint included in the system message |
 | `model` | string | no | Model override sent in the request body |
 | `max_turns` | integer | no | Sent as `max_tokens` in the request body |

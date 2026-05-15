@@ -84,7 +84,8 @@ harness = { type = "hermes", profile = "cto" }
 # overhead.
 #
 # Required fields:
-#   url: The chat completions endpoint (typically /v1/chat/completions)
+#   base_url: The base URL of the Hermes API server (e.g. http://localhost:8080/v1)
+#              The /chat/completions path is appended automatically.
 # Authentication:
 #   Set the HERMES_API_KEY environment variable with your API key.
 #   The key is read from HERMES_API_KEY at runtime — never stored in config.
@@ -92,7 +93,7 @@ harness = { type = "hermes", profile = "cto" }
 # [[steps]]
 # name = "triage-api"
 # prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
-# harness = { type = "hermes_api", url = "http://localhost:8080/v1/chat/completions" }
+# harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
 # # provider = "openai"   # optional: route to a specific provider on the API server
 # # model = "o3"          # optional: model override
 # # max_turns = 10        # optional: max tokens/turns
