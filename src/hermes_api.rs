@@ -167,10 +167,7 @@ async fn run_api_step(
     }
 
     // Build system message that tells the remote agent where its workspace is.
-    let system_content = format!(
-        "Your working directory is: {}",
-        workspace_dir.display()
-    );
+    let system_content = format!("Your working directory is: {}", workspace_dir.display());
 
     let mut messages = vec![ChatMessage {
         role: "system".to_string(),
@@ -405,10 +402,7 @@ mod tests {
     #[test]
     fn system_content_includes_workspace_path() {
         let workspace = Path::new("/tmp/data/owner/repo/42");
-        let system_content = format!(
-            "Your working directory is: {}",
-            workspace.display()
-        );
+        let system_content = format!("Your working directory is: {}", workspace.display());
         assert!(system_content.contains("/tmp/data/owner/repo/42"));
     }
 
