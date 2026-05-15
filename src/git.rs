@@ -1,5 +1,8 @@
 use anyhow::Context;
-use git2::{BranchType, FetchOptions, RemoteCallbacks, Repository, Signature, WorktreeAddOptions, WorktreePruneOptions};
+use git2::{
+    BranchType, FetchOptions, RemoteCallbacks, Repository, Signature, WorktreeAddOptions,
+    WorktreePruneOptions,
+};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
@@ -59,12 +62,7 @@ fn fetch_options(token: &str) -> FetchOptions<'_> {
 
 /// Clone a GitHub repository into `target_dir`.
 #[instrument(skip(token), parent = None)]
-fn clone_repo(
-    owner: &str,
-    repo: &str,
-    token: &str,
-    path: &Path,
-) -> anyhow::Result<()> {
+fn clone_repo(owner: &str, repo: &str, token: &str, path: &Path) -> anyhow::Result<()> {
     let url = format!("https://github.com/{}/{}.git", owner, repo);
 
     tracing::info!("Cloning repo...");
@@ -77,9 +75,14 @@ fn clone_repo(
     let mut builder = git2::build::RepoBuilder::new();
     builder.fetch_options(fetch_options(token));
 
-    builder
-        .clone(&url, path)
-        .map_err(|e| anyhow::anyhow!("git clone failed for {}/{}: {}", owner, repo, scrub_credentials(&e.to_string())))?;
+    builder.clone(&url, path).map_err(|e| {
+        anyhow::anyhow!(
+            "git clone failed for {}/{}: {}",
+            owner,
+            repo,
+            scrub_credentials(&e.to_string())
+        )
+    })?;
 
     tracing::info!("Clone completed.");
     Ok(())
@@ -90,11 +93,7 @@ fn clone_repo(
 /// Pull failure is non-fatal (logged as warning) — the repo might be on
 /// a feature branch or have local changes.
 #[instrument(skip(token), parent = None)]
-fn pull_default_branch(
-    repo_path: &Path,
-    base: &str,
-    token: &str,
-) -> anyhow::Result<()> {
+fn pull_default_branch(repo_path: &Path, base: &str, token: &str) -> anyhow::Result<()> {
     tracing::info!("Pulling latest changes...");
 
     let repo = match Repository::open(repo_path) {
@@ -219,12 +218,15 @@ fn ensure_initial_commit(
 ) -> anyhow::Result<()> {
     tracing::info!("Repository is empty — creating initial commit");
 
-    let repo = Repository::open(repo_path)
-        .context("failed to open repository for initial commit")?;
+    let repo =
+        Repository::open(repo_path).context("failed to open repository for initial commit")?;
 
     // Create a signature for the commit.
-    let sig = Signature::now("agent-orchestrator", "agent-orchestrator@users.noreply.github.com")
-        .context("failed to create git signature for initial commit")?;
+    let sig = Signature::now(
+        "agent-orchestrator",
+        "agent-orchestrator@users.noreply.github.com",
+    )
+    .context("failed to create git signature for initial commit")?;
 
     // Create an empty tree (no files needed)
     let tree_id = repo.treebuilder(None)?.write()?;
@@ -235,12 +237,24 @@ fn ensure_initial_commit(
 
     // Create the empty commit
     let commit_id = match head_commit {
-        Some(parent) => {
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit by agent-orchestrator", &tree, &[&parent])?
-        }
+        Some(parent) => repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Initial commit by agent-orchestrator",
+            &tree,
+            &[&parent],
+        )?,
         None => {
             // No parent — first commit in the repo
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit by agent-orchestrator", &tree, &[])?
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "Initial commit by agent-orchestrator",
+                &tree,
+                &[],
+            )?
         }
     };
 
@@ -323,24 +337,33 @@ pub fn create_worktree(
         ensure_initial_commit(repo_path, base, token)?;
     }
 
-    let repo = Repository::open(repo_path)
-        .context("failed to open repository for worktree creation")?;
+    let repo =
+        Repository::open(repo_path).context("failed to open repository for worktree creation")?;
 
     // Look up the base branch reference.
-    let base_ref = repo.find_reference(&format!("refs/heads/{}", base))
+    let base_ref = repo
+        .find_reference(&format!("refs/heads/{}", base))
         .or_else(|_| repo.find_reference(&format!("refs/remotes/origin/{}", base)))
         .context(format!("failed to find base reference '{}'", base))?;
 
     // Create the new branch pointing to the base commit.
-    let base_commit = base_ref.peel_to_commit()
-        .context(format!("failed to peel base reference '{}' to commit", base))?;
+    let base_commit = base_ref.peel_to_commit().context(format!(
+        "failed to peel base reference '{}' to commit",
+        base
+    ))?;
 
-    repo.branch(branch, &base_commit, false)
-        .context(format!("failed to create branch '{}' (may already exist)", branch))?;
+    repo.branch(branch, &base_commit, false).context(format!(
+        "failed to create branch '{}' (may already exist)",
+        branch
+    ))?;
 
     // Look up the branch reference we just created (for the worktree add options).
-    let branch_ref = repo.find_reference(&format!("refs/heads/{}", branch))
-        .context(format!("failed to find newly created branch reference '{}'", branch))?;
+    let branch_ref = repo
+        .find_reference(&format!("refs/heads/{}", branch))
+        .context(format!(
+            "failed to find newly created branch reference '{}'",
+            branch
+        ))?;
 
     // Create the worktree for the new branch.
     // Use a sanitized worktree name (slashes replaced with hyphens) because
@@ -370,8 +393,8 @@ pub fn remove_worktree(
 ) -> anyhow::Result<()> {
     tracing::info!("Removing worktree...");
 
-    let repo = Repository::open(repo_path)
-        .context("failed to open repository for worktree removal")?;
+    let repo =
+        Repository::open(repo_path).context("failed to open repository for worktree removal")?;
 
     // Find and prune the worktree. This removes the worktree directory
     // and cleans up the administrative state.
@@ -385,7 +408,8 @@ pub fn remove_worktree(
     let mut prune_opts = WorktreePruneOptions::new();
     prune_opts.valid(true).locked(true).working_tree(true);
 
-    worktree.prune(Some(&mut prune_opts))
+    worktree
+        .prune(Some(&mut prune_opts))
         .context("git worktree prune failed")?;
 
     tracing::info!("Worktree removed");
@@ -409,7 +433,9 @@ pub fn remove_worktree(
     }
 
     // Also clean up the worktree path if it still exists (defense-in-depth).
-    if path.exists() && let Err(e) = std::fs::remove_dir_all(path) {
+    if path.exists()
+        && let Err(e) = std::fs::remove_dir_all(path)
+    {
         tracing::warn!(error = %e, "Failed to remove worktree directory after prune");
     }
 
@@ -428,10 +454,10 @@ pub fn has_uncommitted_changes(
         .context("failed to open repository to check for uncommitted changes")?;
 
     let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true);
+    opts.include_untracked(true).recurse_untracked_dirs(true);
 
-    let statuses = repo.statuses(Some(&mut opts))
+    let statuses = repo
+        .statuses(Some(&mut opts))
         .context("failed to get repository status")?;
 
     Ok(!statuses.is_empty())
