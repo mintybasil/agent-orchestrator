@@ -53,7 +53,6 @@ pub enum HarnessConfig {
     /// ```
     HermesApi {
         /// Required: Base URL of the Hermes API server (scheme + host + optional port).
-        /// The API endpoint path is appended automatically at request time.
         /// e.g. "http://localhost:8000"
         base_url: String,
         /// Optional provider override.

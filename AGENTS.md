@@ -168,7 +168,7 @@ The request body follows the OpenAI chat completions schema:
 {
   "model": "<model or null>",
   "messages": [
-    {"role": "system", "content": "You are a software engineering agent...\nYour working directory is: <workspace_path>"},
+    {"role": "system", "content": "Your working directory is: <workspace_path>"},
     {"role": "user", "content": "<rendered prompt>"}
   ],
   "max_tokens": <max_turns or null>

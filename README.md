@@ -2,7 +2,7 @@
 
 A lightweight Rust daemon with pluggable event sources (triggers) to initiate
 multi-step agent workflows using an agent harness — either the
-[Hermes](https://github.com/mintybasil/hermes) CLI, or via the Hermes Agent
+[Hermes](https://github.com/NousResearch/hermes-agent) CLI, or via the Hermes Agent
 REST API (`hermes_api` harness).
 
 ## How it works
@@ -122,7 +122,7 @@ Content-Type: application/json
 {
   "model": "<model or null>",
   "messages": [
-    {"role": "system", "content": "You are a software engineering agent...\nYour working directory is: <workspace_path>"},
+    {"role": "system", "content": "Your working directory is: <workspace_path>"},
     {"role": "user", "content": "<rendered prompt>"}
   ],
   "max_tokens": <max_turns or null>
