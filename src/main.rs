@@ -14,7 +14,6 @@ impl FormatTime for ShortTime {
     }
 }
 
-mod askpass;
 mod config;
 mod dispatcher;
 mod git;
@@ -30,14 +29,6 @@ mod workflow;
 
 #[tokio::main]
 async fn main() {
-    // Askpass mode: if the binary is being re-invoked by git for credentials,
-    // handle it immediately — no logging, no config, no network.
-    if std::env::var(askpass::ASKPASS_MODE_ENV).is_ok() {
-        let args: Vec<String> = std::env::args().collect();
-        let exit_code = askpass::run(&args);
-        std::process::exit(exit_code);
-    }
-
     let cli = Cli::parse();
 
     // Load all workflow configs from the --workflows directory
@@ -65,15 +56,6 @@ async fn main() {
         Ok(t) if !t.is_empty() => t,
         _ => {
             eprintln!("ERROR: GITHUB_TOKEN environment variable is not set or empty");
-            std::process::exit(1);
-        }
-    };
-
-    // Resolve current executable path for GIT_ASKPASS
-    let current_exe = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("ERROR: cannot determine current executable path: {}", e);
             std::process::exit(1);
         }
     };
@@ -137,7 +119,6 @@ async fn main() {
     let dispatcher = dispatcher::Dispatcher::new(
         data_root.clone(),
         token.clone(),
-        current_exe.clone(),
         cli.show_logs,
         cli.limit,
         completed.clone(),
