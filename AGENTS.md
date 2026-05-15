@@ -152,7 +152,7 @@ Configuration fields (`harness = { type = "hermes_api", ... }`):
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080/v1`); the `/chat/completions` path is appended automatically |
+| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080`) |
 | `provider` | string | no | Provider hint included in the system message |
 | `model` | string | no | Model override sent in the request body |
 | `max_turns` | integer | no | Sent as `max_tokens` in the request body |
@@ -390,7 +390,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
+# harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 # harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3", max_turns = 10 }
 
 # Optional pre-hooks (run before the agent harness)

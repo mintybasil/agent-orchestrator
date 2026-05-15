@@ -49,12 +49,12 @@ pub enum HarnessConfig {
     /// Invoke the Hermes Agent via its REST API instead of the CLI.
     ///
     /// ```toml
-    /// harness = { type = "hermes_api", base_url = "http://localhost:8000/v1" }
+    /// harness = { type = "hermes_api", base_url = "http://localhost:8000" }
     /// ```
     HermesApi {
-        /// Required: Base URL of the Hermes API server (scheme + host + optional port + prefix).
-        /// The `/chat/completions` path is appended automatically at request time.
-        /// e.g. `"http://localhost:8000/v1"` or `"https://api.example.com/v1"`
+        /// Required: Base URL of the Hermes API server (scheme + host + optional port).
+        /// The API endpoint path is appended automatically at request time.
+        /// e.g. "http://localhost:8000"
         base_url: String,
         /// Optional provider override.
         #[serde(default)]
@@ -215,7 +215,7 @@ worktree = true
     fn hermes_api_config_deserializes() {
         let toml = r#"
 type = "hermes_api"
-base_url = "http://localhost:8000/v1"
+base_url = "http://localhost:8000"
 provider = "openai"
 model = "o3"
 max_turns = 10
@@ -228,7 +228,7 @@ max_turns = 10
                 model,
                 max_turns,
             } => {
-                assert_eq!(base_url, "http://localhost:8000/v1");
+                assert_eq!(base_url, "http://localhost:8000");
                 assert_eq!(provider, Some("openai".to_string()));
                 assert_eq!(model, Some("o3".to_string()));
                 assert_eq!(max_turns, Some(10));
@@ -241,7 +241,7 @@ max_turns = 10
     fn hermes_api_config_minimal() {
         let toml = r#"
 type = "hermes_api"
-base_url = "https://api.example.com/v1"
+base_url = "https://api.example.com"
 "#;
         let config: HarnessConfig = toml::from_str(toml).unwrap();
         match config {
@@ -251,7 +251,7 @@ base_url = "https://api.example.com/v1"
                 model,
                 max_turns,
             } => {
-                assert_eq!(base_url, "https://api.example.com/v1");
+                assert_eq!(base_url, "https://api.example.com");
                 assert!(provider.is_none());
                 assert!(model.is_none());
                 assert!(max_turns.is_none());
@@ -264,7 +264,7 @@ base_url = "https://api.example.com/v1"
     fn hermes_api_config_rejects_unknown_fields() {
         let toml = r#"
 type = "hermes_api"
-base_url = "http://localhost:8000/v1"
+base_url = "http://localhost:8000"
 profile = "cto"
 "#;
         let result = toml::from_str::<HarnessConfig>(toml);
@@ -282,7 +282,7 @@ profile = "cto"
     #[test]
     fn build_hermes_api() {
         let config = HarnessConfig::HermesApi {
-            base_url: "http://localhost:8000/v1".to_string(),
+            base_url: "http://localhost:8000".to_string(),
             provider: None,
             model: None,
             max_turns: None,

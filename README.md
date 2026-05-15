@@ -52,7 +52,7 @@ repo  = "your-repo"
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
 harness = { type = "hermes", profile = "cto" }
-# harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
+# harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 
 [[steps]]
 name = "implement"
@@ -95,7 +95,7 @@ subprocess and works with remote or containerised agent servers.
 [[steps]]
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
-harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
+harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 # provider = "openai"   # optional
 # model = "o3"          # optional
 # max_turns = 10        # optional
@@ -103,7 +103,7 @@ harness = { type = "hermes_api", base_url = "http://localhost:8080/v1" }
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080/v1`); the `/chat/completions` path is appended automatically |
+| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080`) |
 | `provider` | string | no | Provider hint included in the system message |
 | `model` | string | no | Model override sent in the request body |
 | `max_turns` | integer | no | Sent as `max_tokens` in the request body |

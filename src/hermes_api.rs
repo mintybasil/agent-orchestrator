@@ -1,9 +1,8 @@
 //! Harness implementation for the Hermes Agent REST API.
 //!
-//! Sends a POST request to the `/v1/chat/completions` endpoint derived from
-//! the configured `base_url` using the OpenAI-compatible chat completions
-//! format. Authentication uses a Bearer token from the `HERMES_API_KEY`
-//! environment variable.
+//! Sends a POST request to the chat completions endpoint using the
+//! OpenAI-compatible format. Authentication uses a Bearer token from the
+//! `HERMES_API_KEY` environment variable.
 //!
 //! Since the API-driven agent does not run on the local filesystem, the
 //! worktree/workspace path is injected into the prompt as a system-level
@@ -15,37 +14,34 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// The endpoint path appended to the base URL.
-const CHAT_COMPLETIONS_PATH: &str = "/chat/completions";
+/// Full endpoint path appended to the user-provided base URL.
+const API_PATH: &str = "/v1/chat/completions";
 
 /// Harness that invokes the Hermes Agent via its REST API.
 pub struct HermesApiHarness {
-    /// Base URL of the API server (e.g. "http://localhost:8000/v1").
-    /// The `/chat/completions` path is appended at request time.
+    /// Base URL of the API server (e.g. "http://localhost:8000").
     pub base_url: String,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_turns: Option<u32>,
 }
 
-/// Build the full chat completions URL from a base URL.
+/// Build the full API URL from a base URL.
 ///
 /// Strips a trailing slash from `base_url` (if present) then appends
-/// `/chat/completions`. Returns an error if the base URL already contains
-/// the chat completions path, since that indicates a misconfiguration where
-/// the user provided a full endpoint URL instead of just the base.
-fn chat_completions_url(base_url: &str) -> Result<String> {
+/// the API path. Returns an error if the base URL already contains a
+/// path beyond root, since that indicates the user included internal
+/// routing in the config.
+fn endpoint_url(base_url: &str) -> Result<String> {
     let trimmed = base_url.trim_end_matches('/');
-    if trimmed.ends_with("/chat/completions") {
+    if trimmed.contains("/v1") || trimmed.contains("/chat") {
         anyhow::bail!(
-            "hermes_api base_url should not include the /chat/completions path; \
-             use just the base URL, e.g. \"http://localhost:8000/v1\" instead of \
-             \"http://localhost:8000/v1/chat/completions\". \
-             Got: {:?}",
+            "hermes_api base_url should be just the host URL, e.g. \
+             \"http://localhost:8000\" — got: {:?}",
             base_url
         );
     }
-    Ok(format!("{}{}", trimmed, CHAT_COMPLETIONS_PATH))
+    Ok(format!("{}{}", trimmed, API_PATH))
 }
 
 /// Request body for the `/v1/chat/completions` endpoint.
@@ -109,7 +105,7 @@ impl Harness for HermesApiHarness {
         issue: &str,
         log_config: &LogConfig,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
-        let url = match chat_completions_url(&self.base_url) {
+        let url = match endpoint_url(&self.base_url) {
             Ok(u) => u,
             Err(e) => {
                 return Box::pin(async move { Err(e) });
@@ -289,36 +285,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chat_completions_url_appends_path() {
+    fn endpoint_url_appends_path() {
         assert_eq!(
-            chat_completions_url("http://localhost:8000/v1").unwrap(),
+            endpoint_url("http://localhost:8000").unwrap(),
             "http://localhost:8000/v1/chat/completions"
         );
     }
 
     #[test]
-    fn chat_completions_url_strips_trailing_slash() {
+    fn endpoint_url_strips_trailing_slash() {
         assert_eq!(
-            chat_completions_url("http://localhost:8000/v1/").unwrap(),
+            endpoint_url("http://localhost:8000/").unwrap(),
             "http://localhost:8000/v1/chat/completions"
         );
     }
 
     #[test]
-    fn chat_completions_url_rejects_full_endpoint() {
-        let result = chat_completions_url("http://localhost:8000/v1/chat/completions");
-        assert!(result.is_err(), "should reject base_url that includes /chat/completions");
+    fn endpoint_url_rejects_path_prefix() {
+        let result = endpoint_url("http://localhost:8000/v1");
+        assert!(result.is_err(), "should reject base_url with /v1 path");
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("should not include the /chat/completions path"),
-            "error should explain the misconfiguration, got: {err}"
+            err.contains("should be just the host URL"),
+            "error should explain the config requirement, got: {err}"
         );
     }
 
     #[test]
-    fn chat_completions_url_rejects_full_endpoint_with_trailing_slash() {
-        let result = chat_completions_url("http://localhost:8000/v1/chat/completions/");
-        assert!(result.is_err(), "should reject base_url with path and trailing slash");
+    fn endpoint_url_rejects_full_endpoint() {
+        let result = endpoint_url("http://localhost:8000/v1/chat/completions");
+        assert!(result.is_err(), "should reject base_url with full path");
     }
 
     #[test]
@@ -433,7 +429,7 @@ mod tests {
     #[test]
     fn hermes_api_harness_name() {
         let harness = HermesApiHarness {
-            base_url: "http://localhost:8000/v1".to_string(),
+            base_url: "http://localhost:8000".to_string(),
             provider: None,
             model: None,
             max_turns: None,
