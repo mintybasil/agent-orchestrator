@@ -9,7 +9,7 @@ use tracing_subscriber::fmt::time::FormatTime;
 struct ShortTime;
 
 impl FormatTime for ShortTime {
-    fn format_time(self: &Self, w: &mut Writer<'_>) -> std::fmt::Result {
+    fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
         write!(w, "{}", Local::now().format("%H:%M:%S"))
     }
 }
