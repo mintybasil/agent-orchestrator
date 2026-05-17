@@ -7,6 +7,7 @@ repos = [
     {owner = "mintybasil", repo = "mintybasil.dev"},
     {owner = "mintybasil", repo = "agent-vms-ansible"},
     {owner = "mintybasil", repo = "gha-runners"},
+    {owner = "mintybasil", repo = "enginedj-overlay"},
 ]
 
 [git]
