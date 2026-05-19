@@ -145,12 +145,26 @@ impl Harness for HarnessKind {
     ) -> Result<()> {
         match self {
             HarnessKind::Hermes(h) => {
-                h.run_step(step, workspace_dir, rendered_prompt, error_path, issue, log_config)
-                    .await
+                h.run_step(
+                    step,
+                    workspace_dir,
+                    rendered_prompt,
+                    error_path,
+                    issue,
+                    log_config,
+                )
+                .await
             }
             HarnessKind::HermesApi(h) => {
-                h.run_step(step, workspace_dir, rendered_prompt, error_path, issue, log_config)
-                    .await
+                h.run_step(
+                    step,
+                    workspace_dir,
+                    rendered_prompt,
+                    error_path,
+                    issue,
+                    log_config,
+                )
+                .await
             }
         }
     }

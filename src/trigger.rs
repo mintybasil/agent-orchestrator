@@ -129,10 +129,7 @@ pub trait Trigger {
     fn name(&self) -> &str;
 
     /// Fetch events that should trigger a workflow run.
-    async fn poll(
-        &self,
-        repos: &[RepoConfig],
-    ) -> Result<Vec<TriggerEvent>>;
+    async fn poll(&self, repos: &[RepoConfig]) -> Result<Vec<TriggerEvent>>;
 }
 
 /// Build a runtime Trigger from its config.
@@ -150,14 +147,18 @@ impl TriggerConfig {
                 allowed_users: allowed_users.clone(),
                 token: token.to_string(),
             }),
-            TriggerConfig::GithubPrReview { allowed_users } => TriggerKind::GithubPrReview(GithubPrReviewTrigger {
-                allowed_users: allowed_users.clone(),
-                token: token.to_string(),
-            }),
-            TriggerConfig::LocalFile { path, pattern } => TriggerKind::LocalFile(LocalFileTrigger {
-                directory: path.clone(),
-                pattern: pattern.clone(),
-            }),
+            TriggerConfig::GithubPrReview { allowed_users } => {
+                TriggerKind::GithubPrReview(GithubPrReviewTrigger {
+                    allowed_users: allowed_users.clone(),
+                    token: token.to_string(),
+                })
+            }
+            TriggerConfig::LocalFile { path, pattern } => {
+                TriggerKind::LocalFile(LocalFileTrigger {
+                    directory: path.clone(),
+                    pattern: pattern.clone(),
+                })
+            }
         }
     }
 }
@@ -205,10 +206,7 @@ impl Trigger for GithubIssueAssignedTrigger {
         "github_issue_assigned"
     }
 
-    async fn poll(
-        &self,
-        repos: &[RepoConfig],
-    ) -> Result<Vec<TriggerEvent>> {
+    async fn poll(&self, repos: &[RepoConfig]) -> Result<Vec<TriggerEvent>> {
         let client = GitHubClient::new(self.token.clone());
 
         let mut events = Vec::new();
@@ -237,10 +235,7 @@ impl Trigger for GithubIssueAssignedTrigger {
                         for issue in page {
                             if seen_numbers.insert(issue.number) {
                                 let mut vars = std::collections::HashMap::new();
-                                vars.insert(
-                                    "issue_number".to_string(),
-                                    issue.number.to_string(),
-                                );
+                                vars.insert("issue_number".to_string(), issue.number.to_string());
                                 events.push(TriggerEvent {
                                     owner: repo_cfg.owner.clone(),
                                     repo: repo_cfg.repo.clone(),
@@ -275,17 +270,13 @@ impl Trigger for GithubPrReviewTrigger {
         "github_pr_review"
     }
 
-    async fn poll(
-        &self,
-        repos: &[RepoConfig],
-    ) -> Result<Vec<TriggerEvent>> {
+    async fn poll(&self, repos: &[RepoConfig]) -> Result<Vec<TriggerEvent>> {
         let client = GitHubClient::new(self.token.clone());
 
         let mut events = Vec::new();
         for repo_cfg in repos {
             let mut seen_reviews = std::collections::HashSet::new();
-            match crate::github::list_pr_reviews(&client, &repo_cfg.owner, &repo_cfg.repo).await
-            {
+            match crate::github::list_pr_reviews(&client, &repo_cfg.owner, &repo_cfg.repo).await {
                 Err(e) => {
                     tracing::error!(
                         "GitHub API error for {}/{} (pr_reviews): {}",
@@ -303,8 +294,7 @@ impl Trigger for GithubPrReviewTrigger {
                             let mut vars = std::collections::HashMap::new();
                             vars.insert("pr_number".to_string(), review.pr_number.to_string());
                             vars.insert("review_id".to_string(), review.id.to_string());
-                            let workspace_id =
-                                format!("{}_review-{}", review.pr_number, review.id);
+                            let workspace_id = format!("{}_review-{}", review.pr_number, review.id);
                             events.push(TriggerEvent {
                                 owner: repo_cfg.owner.clone(),
                                 repo: repo_cfg.repo.clone(),
@@ -342,10 +332,7 @@ impl Trigger for LocalFileTrigger {
         "local_file"
     }
 
-    async fn poll(
-        &self,
-        _repos: &[RepoConfig],
-    ) -> Result<Vec<TriggerEvent>> {
+    async fn poll(&self, _repos: &[RepoConfig]) -> Result<Vec<TriggerEvent>> {
         let mut events = Vec::new();
         let dir = std::path::Path::new(&self.directory);
 
