@@ -118,9 +118,8 @@ fn default_glob() -> String {
 
 /// Runtime trigger: produces events that initiate workflow runs.
 ///
-/// The trait uses `'static` return lifetime because all data needed
-/// by the future is cloned into the async block, making self-referential
-/// borrows unnecessary.
+/// Uses native `async fn` in traits (stabilized in Rust 1.75, edition 2024)
+/// instead of the legacy `Pin<Box<dyn Future>>` return type.
 ///
 /// The `poll` method is agnostic to the event source — no GitHub-specific
 /// arguments like `token` are passed. Each implementation owns its own
@@ -130,12 +129,10 @@ pub trait Trigger {
     fn name(&self) -> &str;
 
     /// Fetch events that should trigger a workflow run.
-    fn poll(
+    async fn poll(
         &self,
         repos: &[RepoConfig],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
-    >;
+    ) -> Result<Vec<TriggerEvent>>;
 }
 
 /// Build a runtime Trigger from its config.
@@ -143,24 +140,54 @@ pub trait Trigger {
 /// The `token` parameter is used by GitHub triggers for API authentication.
 /// Non-GitHub triggers ignore it.
 impl TriggerConfig {
-    pub fn build(&self, token: &str) -> Box<dyn Trigger + Send> {
+    pub fn build(&self, token: &str) -> TriggerKind {
         match self {
             TriggerConfig::GithubIssueAssigned {
                 assigned_to,
                 allowed_users,
-            } => Box::new(GithubIssueAssignedTrigger {
+            } => TriggerKind::GithubIssueAssigned(GithubIssueAssignedTrigger {
                 assigned_to: assigned_to.clone(),
                 allowed_users: allowed_users.clone(),
                 token: token.to_string(),
             }),
-            TriggerConfig::GithubPrReview { allowed_users } => Box::new(GithubPrReviewTrigger {
+            TriggerConfig::GithubPrReview { allowed_users } => TriggerKind::GithubPrReview(GithubPrReviewTrigger {
                 allowed_users: allowed_users.clone(),
                 token: token.to_string(),
             }),
-            TriggerConfig::LocalFile { path, pattern } => Box::new(LocalFileTrigger {
+            TriggerConfig::LocalFile { path, pattern } => TriggerKind::LocalFile(LocalFileTrigger {
                 directory: path.clone(),
                 pattern: pattern.clone(),
             }),
+        }
+    }
+}
+
+/// Runtime trigger enum — replaces `Box<dyn Trigger>` for dyn compatibility
+/// with native `async fn` in traits (which cannot be used as trait objects).
+///
+/// Each variant holds a concrete trigger implementation. The enum dispatches
+/// `Trigger` method calls to the inner type, avoiding the need for dynamic
+/// dispatch while keeping the API identical at call sites.
+pub enum TriggerKind {
+    GithubIssueAssigned(GithubIssueAssignedTrigger),
+    GithubPrReview(GithubPrReviewTrigger),
+    LocalFile(LocalFileTrigger),
+}
+
+impl Trigger for TriggerKind {
+    fn name(&self) -> &str {
+        match self {
+            TriggerKind::GithubIssueAssigned(t) => t.name(),
+            TriggerKind::GithubPrReview(t) => t.name(),
+            TriggerKind::LocalFile(t) => t.name(),
+        }
+    }
+
+    async fn poll(&self, repos: &[RepoConfig]) -> Result<Vec<TriggerEvent>> {
+        match self {
+            TriggerKind::GithubIssueAssigned(t) => t.poll(repos).await,
+            TriggerKind::GithubPrReview(t) => t.poll(repos).await,
+            TriggerKind::LocalFile(t) => t.poll(repos).await,
         }
     }
 }
@@ -178,69 +205,61 @@ impl Trigger for GithubIssueAssignedTrigger {
         "github_issue_assigned"
     }
 
-    fn poll(
+    async fn poll(
         &self,
         repos: &[RepoConfig],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
-    > {
-        let assigned_to = self.assigned_to.clone();
-        let allowed_users = self.allowed_users.clone();
-        let repos: Vec<RepoConfig> = repos.to_vec();
-        let token = self.token.clone();
-        let client = GitHubClient::new(token);
+    ) -> Result<Vec<TriggerEvent>> {
+        let client = GitHubClient::new(self.token.clone());
 
-        Box::pin(async move {
-            let mut events = Vec::new();
-            for repo_cfg in &repos {
-                let mut seen_numbers = std::collections::HashSet::new();
-                for user in &allowed_users {
-                    match crate::github::list_assigned_issues(
-                        &client,
-                        &repo_cfg.owner,
-                        &repo_cfg.repo,
-                        &assigned_to,
-                        user,
-                    )
-                    .await
-                    {
-                        Err(e) => {
-                            tracing::error!(
-                                "GitHub API error for {}/{} (creator={}): {}",
-                                repo_cfg.owner,
-                                repo_cfg.repo,
-                                user,
-                                e
-                            );
-                        }
-                        Ok(page) => {
-                            for issue in page {
-                                if seen_numbers.insert(issue.number) {
-                                    let mut vars = std::collections::HashMap::new();
-                                    vars.insert(
-                                        "issue_number".to_string(),
-                                        issue.number.to_string(),
-                                    );
-                                    events.push(TriggerEvent {
-                                        owner: repo_cfg.owner.clone(),
-                                        repo: repo_cfg.repo.clone(),
-                                        key: issue.number.to_string(),
-                                        label: format!(
-                                            "{}/{}#{}",
-                                            repo_cfg.owner, repo_cfg.repo, issue.number
-                                        ),
-                                        workspace_id: issue.number.to_string(),
-                                        number: issue.number,
-                                        variables: vars,
-                                    });
-                                }
+        let mut events = Vec::new();
+        for repo_cfg in repos {
+            let mut seen_numbers = std::collections::HashSet::new();
+            for user in &self.allowed_users {
+                match crate::github::list_assigned_issues(
+                    &client,
+                    &repo_cfg.owner,
+                    &repo_cfg.repo,
+                    &self.assigned_to,
+                    user,
+                )
+                .await
+                {
+                    Err(e) => {
+                        tracing::error!(
+                            "GitHub API error for {}/{} (creator={}): {}",
+                            repo_cfg.owner,
+                            repo_cfg.repo,
+                            user,
+                            e
+                        );
+                    }
+                    Ok(page) => {
+                        for issue in page {
+                            if seen_numbers.insert(issue.number) {
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert(
+                                    "issue_number".to_string(),
+                                    issue.number.to_string(),
+                                );
+                                events.push(TriggerEvent {
+                                    owner: repo_cfg.owner.clone(),
+                                    repo: repo_cfg.repo.clone(),
+                                    key: issue.number.to_string(),
+                                    label: format!(
+                                        "{}/{}#{}",
+                                        repo_cfg.owner, repo_cfg.repo, issue.number
+                                    ),
+                                    workspace_id: issue.number.to_string(),
+                                    number: issue.number,
+                                    variables: vars,
+                                });
                             }
                         }
                     }
                 }
             }
-            Ok(events)
-        })
+        }
+        Ok(events)
     }
 }
 
@@ -256,61 +275,54 @@ impl Trigger for GithubPrReviewTrigger {
         "github_pr_review"
     }
 
-    fn poll(
+    async fn poll(
         &self,
         repos: &[RepoConfig],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
-    > {
-        let allowed_users = self.allowed_users.clone();
-        let repos: Vec<RepoConfig> = repos.to_vec();
-        let token = self.token.clone();
-        let client = GitHubClient::new(token);
+    ) -> Result<Vec<TriggerEvent>> {
+        let client = GitHubClient::new(self.token.clone());
 
-        Box::pin(async move {
-            let mut events = Vec::new();
-            for repo_cfg in &repos {
-                let mut seen_reviews = std::collections::HashSet::new();
-                match crate::github::list_pr_reviews(&client, &repo_cfg.owner, &repo_cfg.repo).await
-                {
-                    Err(e) => {
-                        tracing::error!(
-                            "GitHub API error for {}/{} (pr_reviews): {}",
-                            repo_cfg.owner,
-                            repo_cfg.repo,
-                            e
-                        );
-                    }
-                    Ok(reviews) => {
-                        for review in reviews {
-                            if !allowed_users.contains(&review.user) {
-                                continue;
-                            }
-                            if seen_reviews.insert(review.id) {
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("pr_number".to_string(), review.pr_number.to_string());
-                                vars.insert("review_id".to_string(), review.id.to_string());
-                                let workspace_id =
-                                    format!("{}_review-{}", review.pr_number, review.id);
-                                events.push(TriggerEvent {
-                                    owner: repo_cfg.owner.clone(),
-                                    repo: repo_cfg.repo.clone(),
-                                    key: format!("{}/{}", review.pr_number, review.id),
-                                    label: format!(
-                                        "{}/{}#{}_review-{}",
-                                        repo_cfg.owner, repo_cfg.repo, review.pr_number, review.id
-                                    ),
-                                    workspace_id,
-                                    number: review.pr_number,
-                                    variables: vars,
-                                });
-                            }
+        let mut events = Vec::new();
+        for repo_cfg in repos {
+            let mut seen_reviews = std::collections::HashSet::new();
+            match crate::github::list_pr_reviews(&client, &repo_cfg.owner, &repo_cfg.repo).await
+            {
+                Err(e) => {
+                    tracing::error!(
+                        "GitHub API error for {}/{} (pr_reviews): {}",
+                        repo_cfg.owner,
+                        repo_cfg.repo,
+                        e
+                    );
+                }
+                Ok(reviews) => {
+                    for review in reviews {
+                        if !self.allowed_users.contains(&review.user) {
+                            continue;
+                        }
+                        if seen_reviews.insert(review.id) {
+                            let mut vars = std::collections::HashMap::new();
+                            vars.insert("pr_number".to_string(), review.pr_number.to_string());
+                            vars.insert("review_id".to_string(), review.id.to_string());
+                            let workspace_id =
+                                format!("{}_review-{}", review.pr_number, review.id);
+                            events.push(TriggerEvent {
+                                owner: repo_cfg.owner.clone(),
+                                repo: repo_cfg.repo.clone(),
+                                key: format!("{}/{}", review.pr_number, review.id),
+                                label: format!(
+                                    "{}/{}#{}_review-{}",
+                                    repo_cfg.owner, repo_cfg.repo, review.pr_number, review.id
+                                ),
+                                workspace_id,
+                                number: review.pr_number,
+                                variables: vars,
+                            });
                         }
                     }
                 }
             }
-            Ok(events)
-        })
+        }
+        Ok(events)
     }
 }
 
@@ -330,71 +342,64 @@ impl Trigger for LocalFileTrigger {
         "local_file"
     }
 
-    fn poll(
+    async fn poll(
         &self,
         _repos: &[RepoConfig],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Vec<TriggerEvent>>> + Send + 'static>,
-    > {
-        let directory = self.directory.clone();
-        let pattern = self.pattern.clone();
+    ) -> Result<Vec<TriggerEvent>> {
+        let mut events = Vec::new();
+        let dir = std::path::Path::new(&self.directory);
 
-        Box::pin(async move {
-            let mut events = Vec::new();
-            let dir = std::path::Path::new(&directory);
+        if !dir.is_dir() {
+            tracing::warn!(
+                "local_file trigger: directory does not exist: {}",
+                self.directory
+            );
+            return Ok(events);
+        }
 
-            if !dir.is_dir() {
-                tracing::warn!(
-                    "local_file trigger: directory does not exist: {}",
-                    directory
-                );
-                return Ok(events);
+        let glob_pattern = glob::Pattern::new(&self.pattern)
+            .map_err(|e| anyhow::anyhow!("invalid glob pattern '{}': {}", self.pattern, e))?;
+
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
             }
 
-            let glob_pattern = glob::Pattern::new(&pattern)
-                .map_err(|e| anyhow::anyhow!("invalid glob pattern '{}': {}", pattern, e))?;
+            let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
 
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-
-                if !path.is_file() {
-                    continue;
-                }
-
-                let file_name = match path.file_name().and_then(|n| n.to_str()) {
-                    Some(name) => name.to_string(),
-                    None => continue,
-                };
-
-                if !glob_pattern.matches(&file_name) {
-                    continue;
-                }
-
-                // Use the file stem (without extension) as a readable key,
-                // and the full filename as the workspace_id.
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(&file_name)
-                    .to_string();
-
-                events.push(TriggerEvent {
-                    owner: "local".to_string(),
-                    repo: "local".to_string(),
-                    key: file_name.clone(),
-                    label: format!("local:{}", file_name),
-                    workspace_id: stem.clone(),
-                    number: 0,
-                    variables: std::collections::HashMap::from([
-                        ("file_name".to_string(), file_name.clone()),
-                        ("file_path".to_string(), path.to_string_lossy().into_owned()),
-                    ]),
-                });
+            if !glob_pattern.matches(&file_name) {
+                continue;
             }
 
-            Ok(events)
-        })
+            // Use the file stem (without extension) as a readable key,
+            // and the full filename as the workspace_id.
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&file_name)
+                .to_string();
+
+            events.push(TriggerEvent {
+                owner: "local".to_string(),
+                repo: "local".to_string(),
+                key: file_name.clone(),
+                label: format!("local:{}", file_name),
+                workspace_id: stem.clone(),
+                number: 0,
+                variables: std::collections::HashMap::from([
+                    ("file_name".to_string(), file_name.clone()),
+                    ("file_path".to_string(), path.to_string_lossy().into_owned()),
+                ]),
+            });
+        }
+
+        Ok(events)
     }
 }
 

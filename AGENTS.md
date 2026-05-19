@@ -32,14 +32,14 @@ src/
   config.rs     -- Config struct (TOML) + clap CLI (--workflows / --limit / --interval flags); includes GitConfig
   git.rs        -- Git repo/worktree management via git2-rs: clone/pull, worktree create/remove, token auth via RemoteCallbacks
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
-  harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
+  harness.rs    -- Pluggable agent harness trait (native async fn) + HarnessKind enum (replaces Box<dyn Harness>) + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
   hermes_api.rs -- Harness impl for the Hermes Agent REST API; POST /v1/responses with Bearer auth
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
   template.rs   -- {{key}} placeholder renderer + unit tests
-  trigger.rs    -- Generalized trigger trait + TriggerConfig enum; EventKey, TriggerEvent, LocalFileTrigger
+  trigger.rs    -- Generalized trigger trait (native async fn) + TriggerKind enum (replaces Box<dyn Trigger>) + TriggerConfig enum; EventKey, TriggerEvent, LocalFileTrigger
   workflow.rs   -- Step type (harness-agnostic; harness-specific options live in HarnessConfig)
 config.example.toml  -- Annotated example config (copy to config.toml and edit)
 data/                -- Runtime data dir (gitignored); created on first run
@@ -106,8 +106,9 @@ defined in `src/trigger.rs` (its canonical location) and re-exported from
 Adding a new trigger type:
 1. Add a variant to `TriggerConfig` in `src/trigger.rs`
 2. Add a struct implementing `Trigger` (own any credentials as fields)
-3. Add a match arm in `TriggerConfig::build()` (inject token/credentials here)
-4. Add a match arm in any exhaustive `TriggerConfig` matches (e.g. `config.rs` tests)
+3. Add a variant to `TriggerKind` enum in `src/trigger.rs` and implement the dispatch in `impl Trigger for TriggerKind`
+4. Add a match arm in `TriggerConfig::build()` (return the new `TriggerKind` variant, inject token/credentials here)
+5. Add a match arm in any exhaustive `TriggerConfig` matches (e.g. `config.rs` tests)
 
 ### Hooks
 
@@ -140,8 +141,9 @@ Currently supported:
 Adding a new harness:
 1. Add a variant to `HarnessConfig` in `src/harness.rs` (with its specific fields)
 2. Add a struct implementing `Harness`
-3. Add a match arm in `HarnessConfig::build()`
-4. (Optional) Add a startup validation in `main.rs`
+3. Add a variant to `HarnessKind` enum in `src/harness.rs` and implement the dispatch in `impl Harness for HarnessKind`
+4. Add a match arm in `HarnessConfig::build()` (return the new `HarnessKind` variant)
+5. (Optional) Add a startup validation in `main.rs`
 
 #### Hermes API harness (`hermes_api`)
 
@@ -258,6 +260,14 @@ token-like strings from any output text, though credentials are no longer passed
 through shell command arguments or visible in process listings.
 
 ## Additional architecture notes
+
+**Rust 2024 async fn in traits**: The `Harness` and `Trigger` traits use native
+`async fn` method signatures (Rust edition 2024). Because `async fn` in traits
+is not dyn-compatible, trait objects (`Box<dyn Harness>`, `Box<dyn Trigger>`)
+are replaced with enum dispatch via `HarnessKind` and `TriggerKind`. Each enum
+variant wraps a concrete implementor, and the `impl Trait for Enum` block
+delegates method calls via `match`. This avoids heap allocation and provides
+exhaustive-match safety when adding new variants.
 
 **Concurrency model**: Each eligible event is dispatched as a tokio task.
 `in_flight: HashSet<String>` prevents double-dispatch within a tick.

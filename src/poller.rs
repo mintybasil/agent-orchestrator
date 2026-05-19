@@ -134,7 +134,7 @@ pub async fn run_poll_loop(
 
 /// Pre-processed workflow entry used inside the poll loop.
 struct WorkflowEntry {
-    triggers: Vec<Box<dyn Trigger + Send>>,
+    triggers: Vec<crate::trigger::TriggerKind>,
     steps: Arc<Vec<workflow::Step>>,
     repos: Vec<crate::config::RepoConfig>,
     git_config: crate::config::GitConfig,
@@ -175,7 +175,7 @@ fn load_workflow_entries(
     let entries = configs
         .into_iter()
         .map(|config| {
-            let triggers: Vec<Box<dyn Trigger + Send>> =
+            let triggers: Vec<crate::trigger::TriggerKind> =
                 config.triggers.iter().map(|tc| tc.build(token)).collect();
             let steps = Arc::new(config.steps.clone());
             let repos = config.repos.clone();
