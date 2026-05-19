@@ -252,6 +252,7 @@ harness = { type = "hermes", profile = "cto" }
             crate::harness::HarnessConfig::Hermes { profile, .. } => {
                 assert_eq!(profile, "cto");
             }
+            _ => panic!("expected Hermes harness"),
         }
     }
 

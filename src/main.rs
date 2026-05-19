@@ -20,6 +20,7 @@ mod git;
 mod github;
 mod harness;
 mod hermes;
+mod hermes_api;
 mod hooks;
 mod poller;
 mod runner;

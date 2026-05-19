@@ -78,6 +78,29 @@ name = "implement"
 prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary of what you did to {{output_path}}/step_01_implement.md."
 harness = { type = "hermes", profile = "cto" }
 
+# ── Alternative harness: hermes_api ──────────────────────────────────
+# Uses the Hermes Agent REST API instead of the CLI. This is useful when
+# the agent server is running remotely or you want to avoid subprocess
+# overhead.
+#
+# Required fields:
+#   base_url: The base URL of the Hermes API server (e.g. http://localhost:8080)
+# Authentication:
+#   Set the HERMES_API_KEY environment variable with your API key.
+#   The key is read from HERMES_API_KEY at runtime — never stored in config.
+#
+# The harness uses the Responses API (/v1/responses) endpoint, which supports
+# persistent conversation state and better multi-step agent execution. The
+# workspace path is sent in the "instructions" field (not a system message)
+# to avoid conflicting with the agent's own environment hints.
+#
+# [[steps]]
+# name = "triage-api"
+# prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
+# harness = { type = "hermes_api", base_url = "http://localhost:8080" }
+# # provider = "openai"   # optional: route to a specific provider on the API server
+# # model = "o3"          # optional: model override
+
 # ── Optional pre/post hooks ────────────────────────────────────────────
 # [[steps.pre_hooks]]
 # type = "file_not_empty"

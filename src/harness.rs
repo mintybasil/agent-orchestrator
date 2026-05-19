@@ -46,9 +46,22 @@ pub enum HarnessConfig {
         #[serde(default)]
         max_turns: Option<u32>,
     },
-    // Future variants:
-    // Cursor { binary: String, prompt: String },
-    // ClaudeCode { binary: String, prompt: String },
+    /// Invoke the Hermes Agent via its REST API instead of the CLI.
+    ///
+    /// ```toml
+    /// harness = { type = "hermes_api", base_url = "http://localhost:8000" }
+    /// ```
+    HermesApi {
+        /// Required: Base URL of the Hermes API server (scheme + host + optional port).
+        /// e.g. "http://localhost:8000"
+        base_url: String,
+        /// Optional provider override.
+        #[serde(default)]
+        provider: Option<String>,
+        /// Optional model override.
+        #[serde(default)]
+        model: Option<String>,
+    },
 }
 
 /// Runtime harness trait — each agent backend implements this.
@@ -89,6 +102,15 @@ impl HarnessConfig {
                 model: model.clone(),
                 max_turns: *max_turns,
             }),
+            HarnessConfig::HermesApi {
+                base_url,
+                provider,
+                model,
+            } => Box::new(crate::hermes_api::HermesApiHarness {
+                base_url: base_url.clone(),
+                provider: provider.clone(),
+                model: model.clone(),
+            }),
         }
     }
 }
@@ -119,6 +141,7 @@ max_turns = 10
                 assert_eq!(model, Some("o3".to_string()));
                 assert_eq!(max_turns, Some(10));
             }
+            _ => panic!("expected Hermes variant"),
         }
     }
 
@@ -141,6 +164,7 @@ profile = "cto"
                 assert!(model.is_none());
                 assert!(max_turns.is_none());
             }
+            _ => panic!("expected Hermes variant"),
         }
     }
 
@@ -179,5 +203,79 @@ worktree = true
             err.contains("worktree"),
             "error should mention the unknown field name, got: {err}"
         );
+    }
+
+    #[test]
+    fn hermes_api_config_deserializes() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "http://localhost:8000"
+provider = "openai"
+model = "o3"
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::HermesApi {
+                base_url,
+                provider,
+                model,
+            } => {
+                assert_eq!(base_url, "http://localhost:8000");
+                assert_eq!(provider, Some("openai".to_string()));
+                assert_eq!(model, Some("o3".to_string()));
+            }
+            other => panic!("expected HermesApi, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hermes_api_config_minimal() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "https://api.example.com"
+"#;
+        let config: HarnessConfig = toml::from_str(toml).unwrap();
+        match config {
+            HarnessConfig::HermesApi {
+                base_url,
+                provider,
+                model,
+            } => {
+                assert_eq!(base_url, "https://api.example.com");
+                assert!(provider.is_none());
+                assert!(model.is_none());
+            }
+            other => panic!("expected HermesApi, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hermes_api_config_rejects_unknown_fields() {
+        let toml = r#"
+type = "hermes_api"
+base_url = "http://localhost:8000"
+profile = "cto"
+"#;
+        let result = toml::from_str::<HarnessConfig>(toml);
+        assert!(
+            result.is_err(),
+            "expected unknown field 'profile' to be rejected for hermes_api"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("unknown field"),
+            "error should mention 'unknown field', got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_hermes_api() {
+        let config = HarnessConfig::HermesApi {
+            base_url: "http://localhost:8000".to_string(),
+            provider: None,
+            model: None,
+        };
+        let harness = config.build();
+        assert_eq!(harness.name(), "hermes_api");
     }
 }

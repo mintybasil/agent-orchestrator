@@ -1,8 +1,9 @@
 # agent-orchestrator
 
 A lightweight Rust daemon with pluggable event sources (triggers) to initiate
-multi-step agent workflows using an agent harness
-([Hermes](https://github.com/mintybasil/hermes), or any compatible CLI agent harness).
+multi-step agent workflows using an agent harness — either the
+[Hermes](https://github.com/NousResearch/hermes-agent) CLI, or via the Hermes Agent
+REST API (`hermes_api` harness).
 
 ## How it works
 
@@ -51,10 +52,11 @@ repo  = "your-repo"
 name = "triage"
 prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
 harness = { type = "hermes", profile = "cto" }
+# harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 
 [[steps]]
 name = "implement"
-prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary to {{output_path}}/step_01_implement.md."
+prompt_template = "Read the triage at {{output_path}}/step_00_triage.md. Implement the changes described. Write a summary of what you did to {{output_path}}/step_01_implement.md."
 harness = { type = "hermes", profile = "cto" }
 
 [git]
@@ -69,7 +71,7 @@ default_branch = "main" # Branch for pull/worktree (default: "main")
 |---|---|---|---|
 | `name` | string | yes | Human-readable step name (used in log output and error filenames) |
 | `prompt_template` | string | yes | Prompt sent to hermes; supports `{{placeholders}}` |
-| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider` and `model` |
+| `harness` | table | yes | Agent harness config; `type = "hermes"` with `profile`, optional `provider`, `model`, and `max_turns`; or `type = "hermes_api"` with `base_url`, optional `provider` and `model` |
 
 ### Hermes invocation
 
@@ -82,6 +84,57 @@ sh -c 'hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <p
 Shell redirection avoids OS pipe buffer limits that caused log truncation
 with `Stdio::piped()`. After the process exits, log lines are post-processed
 to add UTC timestamps.
+
+### Hermes API invocation (hermes_api harness)
+
+An alternative to the CLI-based harness, `hermes_api` sends prompts directly
+to a Hermes Agent REST API endpoint over HTTP. This avoids spawning a
+subprocess and works with remote or containerised agent servers.
+
+```toml
+[[steps]]
+name = "triage"
+prompt_template = "Read GitHub issue #{{issue_number}} in {{owner}}/{{repo}}. Write a triage summary to {{output_path}}/triage.md."
+harness = { type = "hermes_api", base_url = "http://localhost:8080" }
+# provider = "openai"   # optional
+# model = "o3"          # optional
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080`) |
+| `provider` | string | no | Provider hint included in the `instructions` field |
+| `model` | string | no | Model override sent in the request body |
+
+Authentication uses a Bearer token read from the `HERMES_API_KEY` environment
+variable at runtime (never stored in config). If the variable is not set, the
+step fails immediately with a clear error message.
+
+The API request follows the Responses API format:
+
+```json
+POST /v1/responses
+Authorization: Bearer ***
+Content-Type: application/json
+
+{
+  "model": "<model or null>",
+  "instructions": "All work is in: /path/to/workspace. Always run `cd /path/to/workspace` as your first action before any file or terminal operations. Reference all file paths relative to this directory.",
+  "input": "<rendered prompt>",
+  "store": true
+}
+```
+
+The `instructions` field provides persistent system-level guidance for the
+agent — it includes the workspace directory with an explicit `cd` instruction
+(to avoid conflicting with the agent's own environment hints) and the provider
+hint if specified. The `store` flag enables server-side conversation persistence
+for multi-turn follow-ups.
+
+The response log includes both the raw API response and the extracted
+assistant content, written to the standard step log file with timestamps.
+On failure, the HTTP status and error detail are written to the `.error`
+file and logged via tracing.
 
 ### Template placeholders
 
@@ -145,6 +198,7 @@ export GITHUB_TOKEN=***
 | Variable | Default | Purpose |
 |---|---|---|
 | `GITHUB_TOKEN` | — | GitHub API auth (required) |
+| `HERMES_API_KEY` | — | API key for `hermes_api` harness auth (required when using `hermes_api`) |
 | `RUST_LOG` | `info` | Log level passed to `tracing-subscriber` |
 
 The daemon logs to stdout via `tracing`; set `RUST_LOG=debug` for verbose output

@@ -34,6 +34,7 @@ src/
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait + HarnessConfig enum (each variant carries its own options)
   hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
+  hermes_api.rs -- Harness impl for the Hermes Agent REST API; POST /v1/responses with Bearer auth
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
   runner.rs     -- Per-issue sequential step executor (uses Harness + hooks + worktree lifecycle)
@@ -123,8 +124,10 @@ Harnesses define **which agent backend runs a step**. They implement the
 
 Each `HarnessConfig` variant carries **harness-specific options** — the Step
 struct is harness-agnostic. For example, `HarnessConfig::Hermes` carries
-`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI flags, not
-generic step concerns.
+`profile`, `provider`, `model`, and `max_turns` because those are hermes CLI
+flags, not generic step concerns. The `hermes_api` variant carries `base_url`,
+`provider`, and `model` — but not `max_turns`, since the Responses API
+endpoint does not expose a turn-limit parameter.
 
 **Note**: Worktree management is handled by the orchestrator (via `[git]`
 config), not by individual harness steps. The `--worktree` flag has been removed
@@ -132,12 +135,54 @@ from the hermes harness.
 
 Currently supported:
 - `hermes` — invokes the hermes CLI agent
+- `hermes_api` — invokes the Hermes Agent via its REST API (`/v1/responses`)
 
 Adding a new harness:
 1. Add a variant to `HarnessConfig` in `src/harness.rs` (with its specific fields)
 2. Add a struct implementing `Harness`
 3. Add a match arm in `HarnessConfig::build()`
 4. (Optional) Add a startup validation in `main.rs`
+
+#### Hermes API harness (`hermes_api`)
+
+The `hermes_api` harness sends prompts to the Hermes Agent REST API using
+the Responses API (`/v1/responses`) endpoint. It avoids spawning a subprocess
+and works with remote or containerised agent servers.
+
+Configuration fields (`harness = { type = "hermes_api", ... }`):
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `base_url` | string | yes | Base URL of the Hermes API server (e.g. `http://localhost:8080`) |
+| `provider` | string | no | Provider hint included in the `instructions` field |
+| `model` | string | no | Model override sent in the request body |
+
+Authentication uses a Bearer token read from the `HERMES_API_KEY` environment
+variable at runtime. The variable is checked on each invocation; if it is not
+set, the step fails immediately with a clear error message. The API key is
+never stored in the config file.
+
+The request body follows the Responses API schema:
+
+```json
+{
+  "model": "<model or null>",
+  "instructions": "All work is in: /path/to/workspace. Always run `cd /path/to/workspace` as your first action...Provider: openai",
+  "input": "<rendered prompt>",
+  "store": true
+}
+```
+
+The `instructions` field provides persistent system-level guidance for the
+agent session — it includes the workspace directory (with an explicit `cd`
+instruction to avoid conflicting with the agent's own environment hints) and
+the provider hint if specified. The `input` field carries the rendered prompt
+for this step. The `store` flag enables server-side conversation persistence
+so that multi-turn follow-ups can reference previous responses.
+
+On success, the full API response and extracted assistant content are written
+to the step log file (with timestamps). On failure, the HTTP status and error
+detail are written to the `.error` file.
 
 ### Hot-reload
 
@@ -254,8 +299,8 @@ to avoid hitting the limit.
 **Adaptive backoff**: When a 403 Forbidden response contains "rate limit"
 or "abuse" in the body (or `X-RateLimit-Remaining` is 0), the client sleeps
 until the `X-RateLimit-Reset` epoch and retries once. Sleep duration is clamped
-to [1s, 300s] to avoid indefinite waits. A non-rate-limit 403 is returned as
-an error without retry.
+to [1s, 300s] to avoid indefinite waits. A non-rate-limit 403 is returned as an
+error without retry.
 
 **GitHub pagination**: `list_assigned_issues()` and `list_pr_reviews()` loop with a `page` counter
 until GitHub returns an empty page. `per_page=100` minimises round trips.
@@ -311,7 +356,7 @@ agent-orchestrator --workflows /path/to/workflows/ --limit 4 --interval 30
 ```toml
 [git]
 clone = true           # Whether to clone/pull the repo (default: true)
-worktree = false       # Per-issue worktrees (default: false; requires clone = true)
+worktree = false       # Per-event worktrees (default: false; requires clone = true)
 default_branch = "main" # Branch for pull/worktree (default: "main")
 ```
 
@@ -340,6 +385,7 @@ allowed_users = ["your-github-username"]
 name = "my-step"
 prompt_template = "Do something for {{owner}}/{{repo}} issue {{issue_number}}. Write output to {{output_path}}/my-step.md."
 harness = { type = "hermes", profile = "cto" }
+# harness = { type = "hermes_api", base_url = "http://localhost:8080" }
 # harness = { type = "hermes", profile = "cto", provider = "openai", model = "o3", max_turns = 10 }
 
 # Optional pre-hooks (run before the agent harness)
@@ -398,7 +444,7 @@ Hooks run in declaration order. A failure aborts the step and marks the issue as
 - `--workflows` directory must contain at least one `.toml` file (validated on startup, hard exit if not).
 - `--limit` caps concurrent workflow runs; 0 means unlimited (default).
 - `--interval` sets the poll interval in seconds; defaults to 60.
-- `--show-logs` flag: when set, harness output is printed to the terminal in addition to being written to log files. Log files are always written.
+- `--show-logs` flag: when set, harness output is also printed to the terminal in addition to being written to log files. Log files are always written.
 
 ## Debugging a failed event
 
