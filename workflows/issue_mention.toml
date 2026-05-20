@@ -1,5 +1,13 @@
 repos = [
-    {owner = "your-org", repo = "your-repo"},
+    {owner = "zerokrab", repo = "bento-hancho"},
+    {owner = "zerokrab", repo = "bento-bench"},
+    {owner = "zerokrab", repo = "boundless-profit-explorer"},
+    {owner = "zerokrab", repo = "bento-bench-autorun"},
+    {owner = "mintybasil", repo = "agent-orchestrator"},
+    {owner = "mintybasil", repo = "mintybasil.dev"},
+    {owner = "mintybasil", repo = "agent-vms-ansible"},
+    {owner = "mintybasil", repo = "gha-runners"},
+    {owner = "mintybasil", repo = "enginedj-overlay"},
 ]
 
 [git]
@@ -9,7 +17,7 @@ default_branch = "main"
 
 [[triggers]]
 type = "github_issue_mention"
-mentioned_user = "your-github-username"
+mentioned_user = "zeroklaw"
 
 # Workflow steps executed sequentially for each mentioned issue.
 # Template placeholders: {{owner}}, {{repo}}, {{issue_number}}, {{mentioned_user}}, {{output_path}}, {{default_branch}}, {{repo_path}}
@@ -23,4 +31,4 @@ You have been @mentioned in issue #{{issue_number}} in {{owner}}/{{repo}}.
 2. **Always** respond with a comment on the issue addressing what was asked of you.
 3. If a code change is requested, optionally open a PR to address it.
 """
-harness = { type = "hermes_api", profile = "swe" }
+harness = { type = "hermes_api", base_url = "http://localhost:8644" }
