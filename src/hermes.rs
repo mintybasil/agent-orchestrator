@@ -5,42 +5,41 @@ use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Prepend a UTC timestamp to a line for log file output.
+/// Generate a header timestamp string for log file output.
 ///
-/// Format: `[YYYY-MM-DD HH:MM:SS UTC] <line>`
-pub fn timestamp_line(line: &str) -> String {
-    format!("[{}] {}", Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), line)
+/// Format: `[YYYY-MM-DD HH:MM:SS UTC]`
+fn header_timestamp() -> String {
+    format!("[{}]", Utc::now().format("%Y-%m-%d %H:%M:%S UTC"))
 }
 
-/// Post-process a log file by prepending a UTC timestamp to every line.
+/// Post-process a log file by prepending a single UTC timestamp header.
 ///
-/// Reads the raw (untimestamped) log file produced by shell redirection,
-/// prefixes each line with `[YYYY-MM-DD HH:MM:SS UTC]`, and overwrites
-/// the file in place. This provides parity with the old pipe-draining
-/// architecture which timestamped lines as they streamed in.
+/// Reads the raw log file produced by shell redirection, prepends a
+/// single `[YYYY-MM-DD HH:MM:SS UTC]` header line, and overwrites
+/// the file in place. Unlike the old per-line timestamping, the content
+/// lines are kept verbatim under the header.
 fn timestamp_log_file(path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(path).map_err(|e| {
         anyhow::anyhow!("failed to read log file for timestamping {:?}: {}", path, e)
     })?;
 
-    let timestamped = timestamp_log_string(&content);
+    let timestamped = add_header_timestamp(&content);
 
     std::fs::write(path, timestamped)
         .map_err(|e| anyhow::anyhow!("failed to write timestamped log file {:?}: {}", path, e))?;
     Ok(())
 }
 
-/// Prepend a UTC timestamp to every line of a string.
+/// Prepend a single UTC timestamp header line to content.
 ///
 /// Used by harnesses that produce output in-memory (e.g. hermes_api)
-/// rather than via shell redirection into a file.
-pub fn timestamp_log_string(content: &str) -> String {
-    let mut result = String::new();
-    for line in content.lines() {
-        result.push_str(&timestamp_line(line));
-        result.push('\n');
+/// rather than via shell redirection into a file. The content lines
+/// are kept verbatim under the header.
+pub fn add_header_timestamp(content: &str) -> String {
+    if content.is_empty() {
+        return String::new();
     }
-    result
+    format!("{}\n{}", header_timestamp(), content)
 }
 
 /// Arguments for invoking the hermes CLI agent.
@@ -71,8 +70,8 @@ pub struct InvokeArgs {
 /// Python TUI framework buffering issues that caused log truncation with
 /// `Stdio::piped()`.
 ///
-/// On success: the log file is post-processed to add UTC timestamps to
-/// each line for parity with the previous pipe-draining behavior.
+/// On success: the log file is post-processed to add a single UTC timestamp
+/// header at the top of the file.
 ///
 /// On non-zero exit: reads the error file (populated by shell stderr
 /// redirection) and returns `Err` with the stderr content.
@@ -121,7 +120,7 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to execute hermes via shell: {}", e))?;
 
     if status.success() {
-        // Post-process log file to add timestamps
+        // Post-process log file to add a single header timestamp
         if let Err(e) = timestamp_log_file(&args.log_file) {
             tracing::warn!(
                 issue = %args.issue,
@@ -147,7 +146,7 @@ pub fn invoke(args: &InvokeArgs) -> Result<()> {
         // Read the error file for error context
         let stderr_text = std::fs::read_to_string(&args.error_file).unwrap_or_default();
 
-        // Also timestamp the log file on failure (it may contain useful partial output)
+        // Also add header timestamp to log file on failure (it may contain useful partial output)
         if let Err(e) = timestamp_log_file(&args.log_file) {
             tracing::warn!(
                 issue = %args.issue,
@@ -243,36 +242,56 @@ mod tests {
     use regex::Regex;
     use tempfile::TempDir;
 
-    // --- timestamp_line tests ---
+    // --- header_timestamp tests ---
 
     #[test]
-    fn test_timestamp_line_format() {
-        let result = timestamp_line("hello world");
-        // Should match [YYYY-MM-DD HH:MM:SS UTC] hello world
-        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] hello world$").unwrap();
+    fn test_header_timestamp_format() {
+        let result = header_timestamp();
+        // Should match [YYYY-MM-DD HH:MM:SS UTC]
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]$").unwrap();
         assert!(
             re.is_match(&result),
-            "timestamp_line output did not match expected format: {result}"
+            "header_timestamp output did not match expected format: {result}"
+        );
+    }
+
+    // --- add_header_timestamp tests ---
+
+    #[test]
+    fn test_add_header_timestamp_basic() {
+        let result = add_header_timestamp("line one\nline two\n");
+        // Should start with a single header line, then raw content
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]\n").unwrap();
+        assert!(
+            re.is_match(&result),
+            "should start with header timestamp: {result}"
+        );
+        assert!(result.contains("line one"), "should contain 'line one'");
+        assert!(result.contains("line two"), "should contain 'line two'");
+        // Content lines should NOT have their own timestamps
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 3, "should have header + 2 content lines");
+        // Only the first line should have the timestamp prefix
+        assert!(
+            lines[0].starts_with('['),
+            "first line should be the header timestamp"
+        );
+        assert_eq!(
+            lines[1], "line one",
+            "content line should not have timestamp prefix"
+        );
+        assert_eq!(
+            lines[2], "line two",
+            "content line should not have timestamp prefix"
         );
     }
 
     #[test]
-    fn test_timestamp_line_empty() {
-        let result = timestamp_line("");
-        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] $").unwrap();
+    fn test_add_header_timestamp_empty() {
+        let result = add_header_timestamp("");
         assert!(
-            re.is_match(&result),
-            "timestamp_line with empty input did not match: {result}"
-        );
-    }
-
-    #[test]
-    fn test_timestamp_line_preserves_content() {
-        let content = "some log output with special chars: !@#$%^&*()";
-        let result = timestamp_line(content);
-        assert!(
-            result.ends_with(content),
-            "timestamp_line should preserve the original content at the end: {result}"
+            result.is_empty(),
+            "empty input should produce empty output, got: {result}"
         );
     }
 
@@ -289,16 +308,24 @@ mod tests {
         timestamp_log_file(&log_path).unwrap();
 
         let result = std::fs::read_to_string(&log_path).unwrap();
-        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]").unwrap();
-        for line in result.lines() {
-            assert!(
-                re.is_match(line),
-                "each line should have a timestamp prefix: {line}"
-            );
-        }
+        // Should start with a single timestamp header
+        let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]\n").unwrap();
+        assert!(
+            re.is_match(&result),
+            "should start with header timestamp: {result}"
+        );
         assert!(result.contains("line one"), "should contain 'line one'");
         assert!(result.contains("line two"), "should contain 'line two'");
         assert!(result.contains("line three"), "should contain 'line three'");
+        // Only one timestamp (the header), not per-line
+        let timestamp_count = Regex::new(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]")
+            .unwrap()
+            .find_iter(&result)
+            .count();
+        assert_eq!(
+            timestamp_count, 1,
+            "should have exactly one timestamp (header), found {timestamp_count}"
+        );
     }
 
     #[test]
@@ -308,16 +335,11 @@ mod tests {
 
         std::fs::write(&log_path, "").unwrap();
 
-        // Should succeed on empty file
+        // Should succeed on empty file (add_header_timestamp returns empty for empty input)
         timestamp_log_file(&log_path).unwrap();
 
-        // Empty file produces a single empty timestamped line (or empty output)
         let result = std::fs::read_to_string(&log_path).unwrap();
-        // An empty file has 0 lines from .lines(), so the output should be empty
-        assert!(
-            result.is_empty(),
-            "empty file should produce empty timestamped output"
-        );
+        assert!(result.is_empty(), "empty file should produce empty output");
     }
 
     #[test]
@@ -331,7 +353,7 @@ mod tests {
 
     // --- invoke tests using shell redirection ---
 
-    /// Test that invoke produces a log file with timestamped content
+    /// Test that invoke produces a log file with a header timestamp
     /// when the command succeeds.
     #[test]
     fn test_invoke_success_logs() {
@@ -372,11 +394,20 @@ mod tests {
         let re = Regex::new(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]").unwrap();
         assert!(
             re.is_match(&timestamped),
-            "timestamped log should have prefix: {timestamped}"
+            "timestamped log should have header: {timestamped}"
         );
         assert!(
             timestamped.contains("hello from test"),
             "timestamped log should still contain original content"
+        );
+        // Only one timestamp prefix (the header), not per-line
+        let timestamp_count = Regex::new(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]")
+            .unwrap()
+            .find_iter(&timestamped)
+            .count();
+        assert_eq!(
+            timestamp_count, 1,
+            "should have exactly one header timestamp, found {timestamp_count}"
         );
 
         // Error file should be empty (no stderr from echo)
@@ -473,10 +504,19 @@ mod tests {
             timestamped.contains("LINE 1000"),
             "timestamped log is missing the end"
         );
+        // Only one timestamp (header), not per-line
+        let timestamp_count = Regex::new(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]")
+            .unwrap()
+            .find_iter(&timestamped)
+            .count();
+        assert_eq!(
+            timestamp_count, 1,
+            "should have exactly one header timestamp, found {timestamp_count}"
+        );
     }
 
     /// Test that output without a trailing newline is still captured
-    /// and timestamped correctly.
+    /// and the header timestamp is prepended correctly.
     #[test]
     fn test_invoke_no_trailing_newline() {
         let tmp = TempDir::new().unwrap();

@@ -33,7 +33,7 @@ src/
   git.rs        -- Git repo/worktree management via git2-rs: clone/pull, worktree create/remove, token auth via RemoteCallbacks
   github.rs     -- GitHub API client (GitHubClient) with rate limit tracking + adaptive backoff; paginated list_assigned_issues() and list_pr_reviews()
   harness.rs    -- Pluggable agent harness trait (native async fn) + HarnessKind enum (replaces Box<dyn Harness>) + HarnessConfig enum (each variant carries its own options)
-  hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + timestamp_log_file()
+  hermes.rs     -- Harness impl for the hermes CLI agent; invoke() via shell redirection + add_header_timestamp()
   hermes_api.rs -- Harness impl for the Hermes Agent REST API; POST /v1/responses with Bearer auth
   hooks.rs      -- Hook enum + run_hook() dispatcher; pre/post step checks
   poller.rs     -- tokio poll loop using Trigger trait, concurrency dedup, capped concurrency (Semaphore), JSON persistence, multi-workflow support, hot-reload workflow configs via mtime scanning
