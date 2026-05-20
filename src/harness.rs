@@ -65,9 +65,6 @@ pub enum HarnessConfig {
 }
 
 /// Runtime harness trait — each agent backend implements this.
-///
-/// Uses native `async fn` in traits (stabilized in Rust 1.75, edition 2024)
-/// instead of the legacy `Pin<Box<dyn Future>>` return type.
 pub trait Harness {
     /// Human-readable name for logging.
     fn name(&self) -> &str;
@@ -115,8 +112,7 @@ impl HarnessConfig {
     }
 }
 
-/// Runtime harness enum — replaces `Box<dyn Harness>` for dyn compatibility
-/// with native `async fn` in traits (which cannot be used as trait objects).
+/// Runtime harness enum
 ///
 /// Each variant holds a concrete harness implementation. The enum dispatches
 /// `Harness` method calls to the inner type, avoiding the need for dynamic

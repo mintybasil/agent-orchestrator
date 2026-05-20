@@ -118,9 +118,6 @@ fn default_glob() -> String {
 
 /// Runtime trigger: produces events that initiate workflow runs.
 ///
-/// Uses native `async fn` in traits (stabilized in Rust 1.75, edition 2024)
-/// instead of the legacy `Pin<Box<dyn Future>>` return type.
-///
 /// The `poll` method is agnostic to the event source — no GitHub-specific
 /// arguments like `token` are passed. Each implementation owns its own
 /// credentials (injected at construction time via `TriggerConfig::build`).
@@ -163,8 +160,7 @@ impl TriggerConfig {
     }
 }
 
-/// Runtime trigger enum — replaces `Box<dyn Trigger>` for dyn compatibility
-/// with native `async fn` in traits (which cannot be used as trait objects).
+/// Runtime trigger enum
 ///
 /// Each variant holds a concrete trigger implementation. The enum dispatches
 /// `Trigger` method calls to the inner type, avoiding the need for dynamic
