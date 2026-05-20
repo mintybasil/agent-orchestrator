@@ -381,11 +381,23 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(compact).unwrap();
         let pretty = serde_json::to_string_pretty(&value).unwrap();
         // Pretty-printed JSON should have newlines and indentation
-        assert!(pretty.contains('\n'), "pretty-printed JSON should have newlines");
-        assert!(pretty.contains("  "), "pretty-printed JSON should have indentation");
+        assert!(
+            pretty.contains('\n'),
+            "pretty-printed JSON should have newlines"
+        );
+        assert!(
+            pretty.contains("  "),
+            "pretty-printed JSON should have indentation"
+        );
         // The data should still be intact
-        assert!(pretty.contains("resp_test"), "pretty-printed JSON should preserve data");
-        assert!(pretty.contains("completed"), "pretty-printed JSON should preserve data");
+        assert!(
+            pretty.contains("resp_test"),
+            "pretty-printed JSON should preserve data"
+        );
+        assert!(
+            pretty.contains("completed"),
+            "pretty-printed JSON should preserve data"
+        );
     }
 
     #[test]

@@ -276,8 +276,14 @@ mod tests {
             lines[0].starts_with('['),
             "first line should be the header timestamp"
         );
-        assert_eq!(lines[1], "line one", "content line should not have timestamp prefix");
-        assert_eq!(lines[2], "line two", "content line should not have timestamp prefix");
+        assert_eq!(
+            lines[1], "line one",
+            "content line should not have timestamp prefix"
+        );
+        assert_eq!(
+            lines[2], "line two",
+            "content line should not have timestamp prefix"
+        );
     }
 
     #[test]
@@ -333,10 +339,7 @@ mod tests {
         timestamp_log_file(&log_path).unwrap();
 
         let result = std::fs::read_to_string(&log_path).unwrap();
-        assert!(
-            result.is_empty(),
-            "empty file should produce empty output"
-        );
+        assert!(result.is_empty(), "empty file should produce empty output");
     }
 
     #[test]
