@@ -344,7 +344,6 @@ struct PullRequest {
     number: u64,
 }
 
-
 /// An issue where a specific user was @mentioned.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MentionedIssue {

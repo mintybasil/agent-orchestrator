@@ -568,7 +568,10 @@ mentioned_user = "alice"
             variables: vars,
         };
         assert_eq!(event.variables.get("issue_number"), Some(&"42".to_string()));
-        assert_eq!(event.variables.get("mentioned_user"), Some(&"alice".to_string()));
+        assert_eq!(
+            event.variables.get("mentioned_user"),
+            Some(&"alice".to_string())
+        );
         assert_eq!(event.workspace_id, "42_mention-alice");
     }
 
