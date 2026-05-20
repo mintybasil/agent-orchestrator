@@ -245,16 +245,22 @@ async fn run_api_step(
         .join("\n");
 
     // Write the full response to the log file.
-    // First write the raw API response, then the extracted content.
+    // First write the raw API response (pretty-printed), then the extracted content.
     let mut log_content = String::new();
     log_content.push_str(&format!("=== API Response (HTTP {}) ===\n", status));
-    log_content.push_str(&response_text);
+
+    // Pretty-print the raw JSON response for readability.
+    let pretty_response = serde_json::from_str::<serde_json::Value>(&response_text)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| response_text.clone());
+    log_content.push_str(&pretty_response);
     log_content.push_str("\n\n=== Assistant Content ===\n");
     log_content.push_str(&assistant_content);
     log_content.push('\n');
 
-    // Timestamp the log file using the same function from hermes.rs.
-    let timestamped = crate::hermes::timestamp_log_string(&log_content);
+    // Add a single header timestamp to the log (no per-line timestamps).
+    let timestamped = crate::hermes::add_header_timestamp(&log_content);
     std::fs::write(log_path, &timestamped).map_err(|e| {
         anyhow::anyhow!("failed to write hermes_api log file {:?}: {}", log_path, e)
     })?;
@@ -366,6 +372,20 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert_eq!(content, "Hello! How can I help?");
+    }
+
+    #[test]
+    fn pretty_print_json_response() {
+        // Verify that compact JSON is pretty-printed with indentation.
+        let compact = r#"{"id":"resp_test","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}"#;
+        let value: serde_json::Value = serde_json::from_str(compact).unwrap();
+        let pretty = serde_json::to_string_pretty(&value).unwrap();
+        // Pretty-printed JSON should have newlines and indentation
+        assert!(pretty.contains('\n'), "pretty-printed JSON should have newlines");
+        assert!(pretty.contains("  "), "pretty-printed JSON should have indentation");
+        // The data should still be intact
+        assert!(pretty.contains("resp_test"), "pretty-printed JSON should preserve data");
+        assert!(pretty.contains("completed"), "pretty-printed JSON should preserve data");
     }
 
     #[test]

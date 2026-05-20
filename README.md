@@ -86,8 +86,8 @@ sh -c 'hermes chat -p <prompt> --yolo --quiet --profile <profile> [--provider <p
 ```
 
 Shell redirection avoids OS pipe buffer limits that caused log truncation
-with `Stdio::piped()`. After the process exits, log lines are post-processed
-to add UTC timestamps.
+with `Stdio::piped()`. After the process exits, the log file is post-processed
+to add a single UTC timestamp header at the top of the file.
 
 ### Hermes API invocation (hermes_api harness)
 
@@ -135,10 +135,10 @@ agent — it includes the workspace directory with an explicit `cd` instruction
 hint if specified. The `store` flag enables server-side conversation persistence
 for multi-turn follow-ups.
 
-The response log includes both the raw API response and the extracted
-assistant content, written to the standard step log file with timestamps.
-On failure, the HTTP status and error detail are written to the `.error`
-file and logged via tracing.
+The response log includes both the raw API response (pretty-printed JSON) and
+the extracted assistant content, written to the standard step log file with a
+single timestamp header. On failure, the HTTP status and error detail are
+written to the `.error` file and logged via tracing.
 
 ### Template placeholders
 
