@@ -44,6 +44,10 @@ type = "github_issue_assigned"
 assigned_to = "your-github-username"
 allowed_users = ["your-github-username"]
 
+# [[triggers]]
+# type = "github_issue_mention"
+# mentioned_user = "your-github-username"
+
 [[repos]]
 owner = "your-org"
 repo  = "your-repo"
@@ -152,6 +156,7 @@ Trigger-specific placeholders are merged at runtime depending on the trigger typ
 |---|---|
 | `github_issue_assigned` | `{{issue_number}}` |
 | `github_pr_review` | `{{pr_number}}` |
+| `github_issue_mention` | `{{issue_number}}`, `{{mentioned_user}}` |
 | `local_file` | `{{file_name}}`, `{{file_path}}` |
 
 ### Hooks

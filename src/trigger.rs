@@ -101,6 +101,8 @@ pub enum TriggerConfig {
     },
     /// Poll GitHub for PR reviews/comments by allowed users.
     GithubPrReview { allowed_users: Vec<String> },
+    /// Poll GitHub for issues where a specific user is @mentioned.
+    GithubIssueMention { mentioned_user: String },
     /// Watch a local directory for files matching a glob pattern.
     /// Each matching file produces a TriggerEvent with the filename as key.
     LocalFile {
@@ -150,6 +152,12 @@ impl TriggerConfig {
                     token: token.to_string(),
                 })
             }
+            TriggerConfig::GithubIssueMention { mentioned_user } => {
+                TriggerKind::GithubIssueMention(GithubIssueMentionTrigger {
+                    mentioned_user: mentioned_user.clone(),
+                    token: token.to_string(),
+                })
+            }
             TriggerConfig::LocalFile { path, pattern } => {
                 TriggerKind::LocalFile(LocalFileTrigger {
                     directory: path.clone(),
@@ -168,6 +176,7 @@ impl TriggerConfig {
 pub enum TriggerKind {
     GithubIssueAssigned(GithubIssueAssignedTrigger),
     GithubPrReview(GithubPrReviewTrigger),
+    GithubIssueMention(GithubIssueMentionTrigger),
     LocalFile(LocalFileTrigger),
 }
 
@@ -176,6 +185,7 @@ impl Trigger for TriggerKind {
         match self {
             TriggerKind::GithubIssueAssigned(t) => t.name(),
             TriggerKind::GithubPrReview(t) => t.name(),
+            TriggerKind::GithubIssueMention(t) => t.name(),
             TriggerKind::LocalFile(t) => t.name(),
         }
     }
@@ -184,6 +194,7 @@ impl Trigger for TriggerKind {
         match self {
             TriggerKind::GithubIssueAssigned(t) => t.poll(repos).await,
             TriggerKind::GithubPrReview(t) => t.poll(repos).await,
+            TriggerKind::GithubIssueMention(t) => t.poll(repos).await,
             TriggerKind::LocalFile(t) => t.poll(repos).await,
         }
     }
@@ -312,6 +323,71 @@ impl Trigger for GithubPrReviewTrigger {
     }
 }
 
+// --- GithubIssueMention Trigger ---
+
+pub struct GithubIssueMentionTrigger {
+    mentioned_user: String,
+    token: String,
+}
+
+impl Trigger for GithubIssueMentionTrigger {
+    fn name(&self) -> &str {
+        "github_issue_mention"
+    }
+
+    async fn poll(&self, repos: &[RepoConfig]) -> Result<Vec<TriggerEvent>> {
+        let client = GitHubClient::new(self.token.clone());
+
+        let mut events = Vec::new();
+        for repo_cfg in repos {
+            match crate::github::list_mentioned_issues(
+                &client,
+                &repo_cfg.owner,
+                &repo_cfg.repo,
+                &self.mentioned_user,
+            )
+            .await
+            {
+                Err(e) => {
+                    tracing::error!(
+                        "GitHub API error for {}/{} (mentions:{}): {}",
+                        repo_cfg.owner,
+                        repo_cfg.repo,
+                        self.mentioned_user,
+                        e
+                    );
+                }
+                Ok(issues) => {
+                    for issue in issues {
+                        let mut vars = std::collections::HashMap::new();
+                        vars.insert("issue_number".to_string(), issue.number.to_string());
+                        vars.insert("mentioned_user".to_string(), self.mentioned_user.clone());
+                        events.push(TriggerEvent {
+                            owner: repo_cfg.owner.clone(),
+                            repo: repo_cfg.repo.clone(),
+                            key: format!(
+                                "{}/{}_mention-{}",
+                                repo_cfg.owner, repo_cfg.repo, issue.number
+                            ),
+                            label: format!(
+                                "{}/{}#{}_mention",
+                                repo_cfg.owner, repo_cfg.repo, issue.number
+                            ),
+                            workspace_id: format!(
+                                "{}_mention-{}",
+                                issue.number, self.mentioned_user
+                            ),
+                            number: issue.number,
+                            variables: vars,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(events)
+    }
+}
+
 // --- LocalFile Trigger ---
 
 /// Watches a local directory for files matching a glob pattern.
@@ -409,6 +485,9 @@ allowed_users = ["bob", "carol"]
             TriggerConfig::GithubPrReview { .. } => {
                 panic!("expected GithubIssueAssigned, got GithubPrReview");
             }
+            TriggerConfig::GithubIssueMention { .. } => {
+                panic!("expected GithubIssueAssigned, got GithubIssueMention");
+            }
             TriggerConfig::LocalFile { .. } => {
                 panic!("expected GithubIssueAssigned, got LocalFile");
             }
@@ -447,6 +526,53 @@ allowed_users = ["alice", "bob"]
         };
         let trigger = config.build("fake-token");
         assert_eq!(trigger.name(), "github_pr_review");
+    }
+
+    #[test]
+    fn github_issue_mention_deserializes() {
+        let toml = r#"
+type = "github_issue_mention"
+mentioned_user = "alice"
+"#;
+        let config: TriggerConfig = toml::from_str(toml).unwrap();
+        match config {
+            TriggerConfig::GithubIssueMention { mentioned_user } => {
+                assert_eq!(mentioned_user, "alice");
+            }
+            _ => panic!("expected GithubIssueMention variant"),
+        }
+    }
+
+    #[test]
+    fn build_github_issue_mention() {
+        let config = TriggerConfig::GithubIssueMention {
+            mentioned_user: "test".to_string(),
+        };
+        let trigger = config.build("fake-token");
+        assert_eq!(trigger.name(), "github_issue_mention");
+    }
+
+    #[test]
+    fn trigger_event_mention_carries_mention_variables() {
+        let vars = std::collections::HashMap::from([
+            ("issue_number".to_string(), "42".to_string()),
+            ("mentioned_user".to_string(), "alice".to_string()),
+        ]);
+        let event = TriggerEvent {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            key: "acme/project_42-mention".to_string(),
+            label: "acme/project#42_mention".to_string(),
+            workspace_id: "42_mention-alice".to_string(),
+            number: 42,
+            variables: vars,
+        };
+        assert_eq!(event.variables.get("issue_number"), Some(&"42".to_string()));
+        assert_eq!(
+            event.variables.get("mentioned_user"),
+            Some(&"alice".to_string())
+        );
+        assert_eq!(event.workspace_id, "42_mention-alice");
     }
 
     #[test]

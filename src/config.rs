@@ -243,6 +243,9 @@ harness = { type = "hermes", profile = "cto" }
             TriggerConfig::GithubPrReview { .. } => {
                 panic!("expected GithubIssueAssigned, got GithubPrReview");
             }
+            TriggerConfig::GithubIssueMention { .. } => {
+                panic!("expected GithubIssueAssigned, got GithubIssueMention");
+            }
             TriggerConfig::LocalFile { .. } => {
                 panic!("expected GithubIssueAssigned, got LocalFile");
             }
