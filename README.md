@@ -156,7 +156,7 @@ Trigger-specific placeholders are merged at runtime depending on the trigger typ
 |---|---|
 | `github_issue_assigned` | `{{issue_number}}` |
 | `github_pr_review` | `{{pr_number}}` |
-| `github_issue_mention` | `{{issue_number}}`, `{{mentioned_user}}` |
+| `github_issue_mention` | `{{issue_number}}`, `{{mentioned_user}}`, `{{comment_id}}` |
 | `local_file` | `{{file_name}}`, `{{file_path}}` |
 
 ### Hooks

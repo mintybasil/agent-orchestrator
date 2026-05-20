@@ -362,21 +362,38 @@ impl Trigger for GithubIssueMentionTrigger {
                         let mut vars = std::collections::HashMap::new();
                         vars.insert("issue_number".to_string(), issue.number.to_string());
                         vars.insert("mentioned_user".to_string(), self.mentioned_user.clone());
+                        vars.insert("comment_id".to_string(), issue.comment_id.to_string());
+                        let (key, label, workspace_id) = if issue.comment_id != 0 {
+                            (
+                                format!(
+                                    "{}/{}#{}_mention_{}",
+                                    repo_cfg.owner, repo_cfg.repo, issue.number, issue.comment_id
+                                ),
+                                format!(
+                                    "{}/{}#{}_mention_{}",
+                                    repo_cfg.owner, repo_cfg.repo, issue.number, issue.comment_id
+                                ),
+                                format!("{}_mention_{}", issue.number, issue.comment_id),
+                            )
+                        } else {
+                            (
+                                format!(
+                                    "{}/{}#{}_mention",
+                                    repo_cfg.owner, repo_cfg.repo, issue.number
+                                ),
+                                format!(
+                                    "{}/{}#{}_mention",
+                                    repo_cfg.owner, repo_cfg.repo, issue.number
+                                ),
+                                format!("{}_mention", issue.number),
+                            )
+                        };
                         events.push(TriggerEvent {
                             owner: repo_cfg.owner.clone(),
                             repo: repo_cfg.repo.clone(),
-                            key: format!(
-                                "{}/{}_mention-{}",
-                                repo_cfg.owner, repo_cfg.repo, issue.number
-                            ),
-                            label: format!(
-                                "{}/{}#{}_mention",
-                                repo_cfg.owner, repo_cfg.repo, issue.number
-                            ),
-                            workspace_id: format!(
-                                "{}_mention-{}",
-                                issue.number, self.mentioned_user
-                            ),
+                            key,
+                            label,
+                            workspace_id,
                             number: issue.number,
                             variables: vars,
                         });
@@ -553,17 +570,18 @@ mentioned_user = "alice"
     }
 
     #[test]
-    fn trigger_event_mention_carries_mention_variables() {
+    fn trigger_event_mention_carries_mention_variables_with_comment_id() {
         let vars = std::collections::HashMap::from([
             ("issue_number".to_string(), "42".to_string()),
             ("mentioned_user".to_string(), "alice".to_string()),
+            ("comment_id".to_string(), "98765".to_string()),
         ]);
         let event = TriggerEvent {
             owner: "acme".to_string(),
             repo: "project".to_string(),
-            key: "acme/project_42-mention".to_string(),
-            label: "acme/project#42_mention".to_string(),
-            workspace_id: "42_mention-alice".to_string(),
+            key: "acme/project#42_mention_98765".to_string(),
+            label: "acme/project#42_mention_98765".to_string(),
+            workspace_id: "42_mention_98765".to_string(),
             number: 42,
             variables: vars,
         };
@@ -572,7 +590,40 @@ mentioned_user = "alice"
             event.variables.get("mentioned_user"),
             Some(&"alice".to_string())
         );
-        assert_eq!(event.workspace_id, "42_mention-alice");
+        assert_eq!(
+            event.variables.get("comment_id"),
+            Some(&"98765".to_string())
+        );
+        assert_eq!(event.key, "acme/project#42_mention_98765");
+        assert_eq!(event.label, "acme/project#42_mention_98765");
+        assert_eq!(event.workspace_id, "42_mention_98765");
+    }
+
+    #[test]
+    fn trigger_event_mention_carries_mention_variables_without_comment_id() {
+        let vars = std::collections::HashMap::from([
+            ("issue_number".to_string(), "42".to_string()),
+            ("mentioned_user".to_string(), "alice".to_string()),
+            ("comment_id".to_string(), "0".to_string()),
+        ]);
+        let event = TriggerEvent {
+            owner: "acme".to_string(),
+            repo: "project".to_string(),
+            key: "acme/project#42_mention".to_string(),
+            label: "acme/project#42_mention".to_string(),
+            workspace_id: "42_mention".to_string(),
+            number: 42,
+            variables: vars,
+        };
+        assert_eq!(event.variables.get("issue_number"), Some(&"42".to_string()));
+        assert_eq!(
+            event.variables.get("mentioned_user"),
+            Some(&"alice".to_string())
+        );
+        assert_eq!(event.variables.get("comment_id"), Some(&"0".to_string()));
+        assert_eq!(event.key, "acme/project#42_mention");
+        assert_eq!(event.label, "acme/project#42_mention");
+        assert_eq!(event.workspace_id, "42_mention");
     }
 
     #[test]

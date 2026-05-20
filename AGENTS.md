@@ -76,7 +76,7 @@ trait and are specified in config via `[[triggers]]` tables.
 Currently supported:
 - `github_issue_assigned` — polls GitHub for issues assigned to a user
 - `github_pr_review` — polls GitHub for PR reviews/comments by allowed users
-- `github_issue_mention` — polls GitHub for issues where a user is @mentioned
+- `github_issue_mention` — polls GitHub for issues where a user is @mentioned (identifies the specific comment containing the mention)
 - `local_file` — watches a local directory for files matching a glob pattern
 
 Each trigger implementation owns its own credentials (injected at construction
@@ -93,8 +93,8 @@ carries:
 | Field | Purpose |
 |---|---|
 | `owner` / `repo` | Repository identifiers (or `"local"` for non-GitHub triggers) |
-| `key` | Opaque dedup string (e.g. `"42"`, `"99/1234567"`) |
-| `workspace_id` | Directory name under the data dir (e.g. `"42"`, `"99_review-1234567"`) |
+| `key` | Opaque dedup string (e.g. `"42"`, `"99/1234567"`, `"acme/project#42_mention_98765"`) |
+| `workspace_id` | Directory name under the data dir (e.g. `"42"`, `"99_review-1234567"`, `"42_mention_98765"`) |
 | `number` | Numeric ID (0 when not applicable) |
 | `label` | Human-readable label for logging |
 | `variables` | Trigger-specific template variables (merged into step prompts) |
@@ -237,6 +237,9 @@ Each monitored repo gets a directory under the data dir:
 For issues, `workspace_id` is the issue number (e.g. `42`).
 For PR reviews, `workspace_id` includes the review ID to ensure each review
 event gets its own discrete directory (e.g. `99_review-1234567`).
+For issue mentions, `workspace_id` includes the comment ID to distinguish
+multiple mentions within the same issue (e.g. `42_mention_98765` for a
+specific comment, or `42_mention` for a mention in the issue body itself).
 For local file triggers, `workspace_id` is derived from the file stem (e.g.
 `plan` for a file named `plan.md`).
 
