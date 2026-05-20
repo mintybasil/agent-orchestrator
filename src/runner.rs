@@ -1,5 +1,6 @@
 use crate::config::GitConfig;
 use crate::git;
+use crate::harness::Harness;
 use crate::hooks;
 use crate::template::render;
 // Re-export EventKey so consumers that imported from runner still compile.

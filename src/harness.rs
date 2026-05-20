@@ -65,9 +65,6 @@ pub enum HarnessConfig {
 }
 
 /// Runtime harness trait — each agent backend implements this.
-///
-/// The trait uses `'static` return lifetime because all data needed
-/// by the future is owned or cloned into the async block.
 pub trait Harness {
     /// Human-readable name for logging.
     fn name(&self) -> &str;
@@ -76,7 +73,7 @@ pub trait Harness {
     ///
     /// `issue` is a human-readable identifier like "owner/repo#123"
     /// for log context.
-    fn run_step(
+    async fn run_step(
         &self,
         step: &Step,
         workspace_dir: &Path,
@@ -84,19 +81,19 @@ pub trait Harness {
         error_path: &Path,
         issue: &str,
         log_config: &LogConfig,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>>;
+    ) -> Result<()>;
 }
 
 /// Build a runtime Harness from its config.
 impl HarnessConfig {
-    pub fn build(&self) -> Box<dyn Harness + Send> {
+    pub fn build(&self) -> HarnessKind {
         match self {
             HarnessConfig::Hermes {
                 profile,
                 provider,
                 model,
                 max_turns,
-            } => Box::new(crate::hermes::HermesHarness {
+            } => HarnessKind::Hermes(crate::hermes::HermesHarness {
                 profile: profile.clone(),
                 provider: provider.clone(),
                 model: model.clone(),
@@ -106,11 +103,65 @@ impl HarnessConfig {
                 base_url,
                 provider,
                 model,
-            } => Box::new(crate::hermes_api::HermesApiHarness {
+            } => HarnessKind::HermesApi(crate::hermes_api::HermesApiHarness {
                 base_url: base_url.clone(),
                 provider: provider.clone(),
                 model: model.clone(),
             }),
+        }
+    }
+}
+
+/// Runtime harness enum
+///
+/// Each variant holds a concrete harness implementation. The enum dispatches
+/// `Harness` method calls to the inner type, avoiding the need for dynamic
+/// dispatch while keeping the API identical at call sites.
+pub enum HarnessKind {
+    Hermes(crate::hermes::HermesHarness),
+    HermesApi(crate::hermes_api::HermesApiHarness),
+}
+
+impl Harness for HarnessKind {
+    fn name(&self) -> &str {
+        match self {
+            HarnessKind::Hermes(h) => h.name(),
+            HarnessKind::HermesApi(h) => h.name(),
+        }
+    }
+
+    async fn run_step(
+        &self,
+        step: &Step,
+        workspace_dir: &Path,
+        rendered_prompt: &str,
+        error_path: &Path,
+        issue: &str,
+        log_config: &LogConfig,
+    ) -> Result<()> {
+        match self {
+            HarnessKind::Hermes(h) => {
+                h.run_step(
+                    step,
+                    workspace_dir,
+                    rendered_prompt,
+                    error_path,
+                    issue,
+                    log_config,
+                )
+                .await
+            }
+            HarnessKind::HermesApi(h) => {
+                h.run_step(
+                    step,
+                    workspace_dir,
+                    rendered_prompt,
+                    error_path,
+                    issue,
+                    log_config,
+                )
+                .await
+            }
         }
     }
 }

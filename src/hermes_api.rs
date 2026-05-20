@@ -105,7 +105,7 @@ impl Harness for HermesApiHarness {
         "hermes_api"
     }
 
-    fn run_step(
+    async fn run_step(
         &self,
         step: &Step,
         workspace_dir: &Path,
@@ -113,38 +113,21 @@ impl Harness for HermesApiHarness {
         error_path: &Path,
         issue: &str,
         log_config: &LogConfig,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
-        let url = match endpoint_url(&self.base_url) {
-            Ok(u) => u,
-            Err(e) => {
-                return Box::pin(async move { Err(e) });
-            }
-        };
-        let provider = self.provider.clone();
-        let model = self.model.clone();
-        let workspace_dir = workspace_dir.to_path_buf();
-        let prompt = rendered_prompt.to_string();
-        let step_name = step.name.clone();
-        let issue = issue.to_string();
-        let log_path = log_config.log_path.clone();
-        let show_logs = log_config.show_logs;
-        let error_path = error_path.to_path_buf();
-
-        Box::pin(async move {
-            run_api_step(
-                &url,
-                provider.as_deref(),
-                model.as_deref(),
-                &workspace_dir,
-                &prompt,
-                &step_name,
-                &issue,
-                &log_path,
-                &error_path,
-                show_logs,
-            )
-            .await
-        })
+    ) -> Result<()> {
+        let url = endpoint_url(&self.base_url)?;
+        run_api_step(
+            &url,
+            self.provider.as_deref(),
+            self.model.as_deref(),
+            workspace_dir,
+            rendered_prompt,
+            &step.name,
+            issue,
+            &log_config.log_path,
+            error_path,
+            log_config.show_logs,
+        )
+        .await
     }
 }
 

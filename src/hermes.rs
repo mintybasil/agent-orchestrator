@@ -210,7 +210,7 @@ impl Harness for HermesHarness {
         "hermes"
     }
 
-    fn run_step(
+    async fn run_step(
         &self,
         step: &Step,
         workspace_dir: &Path,
@@ -218,7 +218,7 @@ impl Harness for HermesHarness {
         error_path: &Path,
         issue: &str,
         log_config: &crate::harness::LogConfig,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'static>> {
+    ) -> Result<()> {
         let args = InvokeArgs {
             prompt: rendered_prompt.to_string(),
             profile: self.profile.clone(),
@@ -233,7 +233,7 @@ impl Harness for HermesHarness {
             step: step.name.clone(),
         };
 
-        Box::pin(async move { tokio::task::spawn_blocking(move || invoke(&args)).await? })
+        tokio::task::spawn_blocking(move || invoke(&args)).await?
     }
 }
 
