@@ -348,6 +348,52 @@ struct PullRequest {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MentionedIssue {
     pub number: u64,
+    /// The ID of the comment that contains the mention, or 0 if the mention
+    /// was in the issue body itself (not in a specific comment).
+    pub comment_id: u64,
+}
+
+/// A comment on a GitHub issue, used to find @mentions.
+#[derive(Debug, Clone, Deserialize)]
+struct IssueComment {
+    id: u64,
+    body: String,
+}
+
+/// Check whether `comment_body` contains a mention of `username` as a whole
+/// word (i.e. `@username` not followed by an alphanumeric character or
+/// underscore).
+fn body_mentions_user(comment_body: &str, username: &str) -> bool {
+    let lower = comment_body.to_lowercase();
+    let pattern = format!("@{}", username.to_lowercase());
+    let bytes = lower.as_bytes();
+    let pat_bytes = pattern.as_bytes();
+    let pat_len = pat_bytes.len();
+
+    let mut start = 0;
+    while start + pat_len <= bytes.len() {
+        if let Some(pos) = lower[start..].find(&pattern) {
+            let abs_pos = start + pos;
+            // Check preceding character: must be at start of string or
+            // preceded by a non-alphanumeric, non-underscore character.
+            let preceded_ok = abs_pos == 0
+                || !bytes[abs_pos - 1].is_ascii_alphanumeric() && bytes[abs_pos - 1] != b'_';
+
+            // Check following character: must be at end of string or
+            // followed by a non-alphanumeric, non-underscore character.
+            let after_end = abs_pos + pat_len;
+            let followed_ok = after_end >= bytes.len()
+                || !bytes[after_end].is_ascii_alphanumeric() && bytes[after_end] != b'_';
+
+            if preceded_ok && followed_ok {
+                return true;
+            }
+            start = abs_pos + 1;
+        } else {
+            break;
+        }
+    }
+    false
 }
 
 /// List open issues in a repository where `mentioned_user` is @mentioned.
@@ -357,17 +403,24 @@ pub struct MentionedIssue {
 ///
 /// This finds issues where the user appears in the body, comments, or
 /// was explicitly @mentioned, regardless of assignment status.
+///
+/// For each issue found, the function also fetches the issue's comments
+/// and tries to identify the specific comment containing the mention.
+/// Each matching comment becomes a separate `MentionedIssue` entry with
+/// the comment's ID in the `comment_id` field. If no matching comment is
+/// found (the mention may be in the issue body itself), the issue is
+/// still included with `comment_id: 0`.
 pub async fn list_mentioned_issues(
     client: &GitHubClient,
     owner: &str,
     repo: &str,
     mentioned_user: &str,
 ) -> Result<Vec<MentionedIssue>> {
-    let mut all_issues: Vec<MentionedIssue> = Vec::new();
+    let mut search_issues: Vec<MentionedIssue> = Vec::new();
     let mut page: u32 = 1;
 
+    // Phase 1: Use Search API to find issues mentioning the user.
     loop {
-        // GitHub Search API: q parameter encodes the query, per_page/page for pagination
         let url = format!(
             "https://api.github.com/search/issues?q=mentions%3A{mentioned_user}+is%3Aissue+is%3Aopen+repo%3A{owner}%2F{repo}&per_page=100&page={page}"
         );
@@ -380,8 +433,13 @@ pub async fn list_mentioned_issues(
         }
 
         #[derive(Debug, Deserialize)]
+        struct SearchItem {
+            number: u64,
+        }
+
+        #[derive(Debug, Deserialize)]
         struct SearchResponse {
-            items: Vec<MentionedIssue>,
+            items: Vec<SearchItem>,
         }
 
         let search: SearchResponse = resp
@@ -393,11 +451,80 @@ pub async fn list_mentioned_issues(
             break;
         }
 
-        all_issues.extend(search.items);
+        for item in search.items {
+            search_issues.push(MentionedIssue {
+                number: item.number,
+                comment_id: 0,
+            });
+        }
         page += 1;
     }
 
-    Ok(all_issues)
+    // Phase 2: For each issue, fetch comments and find the ones that
+    // mention the user. Replace the placeholder entries with specific
+    // comment-level entries when found.
+    let mut result: Vec<MentionedIssue> = Vec::new();
+
+    for issue in search_issues {
+        let mut matching_comments: Vec<u64> = Vec::new();
+
+        let mut comment_page: u32 = 1;
+        loop {
+            let comments_url = format!(
+                "https://api.github.com/repos/{owner}/{repo}/issues/{}/comments?per_page=100&page={comment_page}",
+                issue.number
+            );
+            let resp = client
+                .send_request(client.client.get(&comments_url))
+                .await?;
+
+            let status = resp.status();
+            if !status.is_success() {
+                // Non-fatal: if we can't fetch comments, just skip comment
+                // matching for this issue and include it with comment_id: 0.
+                tracing::warn!(
+                    "Failed to fetch comments for issue #{}: status {}",
+                    issue.number,
+                    status
+                );
+                break;
+            }
+
+            let comments: Vec<IssueComment> = resp
+                .json()
+                .await
+                .context("deserializing GitHub issue comments")?;
+
+            for comment in &comments {
+                if body_mentions_user(&comment.body, mentioned_user) {
+                    matching_comments.push(comment.id);
+                }
+            }
+
+            if comments.len() < 100 {
+                break;
+            }
+            comment_page += 1;
+        }
+
+        if matching_comments.is_empty() {
+            // No matching comment found; the mention is likely in the
+            // issue body itself. Include with comment_id: 0.
+            result.push(MentionedIssue {
+                number: issue.number,
+                comment_id: 0,
+            });
+        } else {
+            for comment_id in matching_comments {
+                result.push(MentionedIssue {
+                    number: issue.number,
+                    comment_id,
+                });
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -496,5 +623,80 @@ mod tests {
         let reset_epoch = now_epoch + 3600;
         let sleep_dur = calculate_sleep_until_reset(Some(reset_epoch)).unwrap();
         assert_eq!(sleep_dur, MAX_BACKOFF_DURATION);
+    }
+
+    #[test]
+    fn test_mentioned_issue_has_comment_id() {
+        let issue = MentionedIssue {
+            number: 42,
+            comment_id: 12345,
+        };
+        assert_eq!(issue.number, 42);
+        assert_eq!(issue.comment_id, 12345);
+    }
+
+    #[test]
+    fn test_mentioned_issue_comment_id_zero_for_body_mention() {
+        let issue = MentionedIssue {
+            number: 7,
+            comment_id: 0,
+        };
+        assert_eq!(issue.number, 7);
+        assert_eq!(issue.comment_id, 0);
+    }
+
+    #[test]
+    fn test_body_mentions_user_simple() {
+        assert!(body_mentions_user("Hey @alice check this out", "alice"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_case_insensitive() {
+        assert!(body_mentions_user("Hey @Alice check this out", "alice"));
+        assert!(body_mentions_user("Hey @alice check this out", "Alice"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_at_start() {
+        assert!(body_mentions_user("@bob look at this", "bob"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_at_end() {
+        assert!(body_mentions_user("look at this @carol", "carol"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_no_partial_match() {
+        // Should NOT match @bobby when looking for @bob
+        assert!(!body_mentions_user("Hey @bobby check this out", "bob"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_no_partial_match_underscore() {
+        // Should NOT match @bob_smith when looking for @bob
+        assert!(!body_mentions_user("Hey @bob_smith check this out", "bob"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_no_match() {
+        assert!(!body_mentions_user("Hey alice check this out", "alice"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_multiple_mentions() {
+        assert!(body_mentions_user("@alice @bob @charlie", "bob"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_punctuation_boundary() {
+        assert!(body_mentions_user("cc @dave, please review", "dave"));
+        assert!(body_mentions_user("(@dave)", "dave"));
+    }
+
+    #[test]
+    fn test_body_mentions_user_no_match_when_prefix_is_alnum() {
+        // "x@alice" should not match "alice" because the preceding char is alphanumeric
+        assert!(!body_mentions_user("x@alice", "alice"));
     }
 }
